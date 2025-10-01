@@ -5,7 +5,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv (universal package runner for MCP servers)
+# Install uv (universal package runner for MCP)
 RUN pip install --no-cache-dir uv
 
 # Expose the default MCP port (used by most servers)

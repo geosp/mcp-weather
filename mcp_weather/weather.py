@@ -127,4 +127,18 @@ async def get_hourly_weather(location: str) -> Dict:
             "country": locations[0]["Country"]["LocalizedName"],
             "current_conditions": current_data,
             "hourly_forecast": hourly_data
-        } 
+        }
+
+
+# === Entry point: run MCP in stdio or http mode ===
+if __name__ == "__main__":
+    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+
+    if transport == "http":
+        port = int(os.getenv("MCP_PORT", "3000"))
+        host = os.getenv("MCP_HOST", "0.0.0.0")
+        print(f"🚀 Starting MCP server in HTTP mode on {host}:{port}")
+        mcp.run(transport="http", host=host, port=port)
+    else:
+        print("🚀 Starting MCP server in STDIO mode")
+        mcp.run()
