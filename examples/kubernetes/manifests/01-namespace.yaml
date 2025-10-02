@@ -1,0 +1,20 @@
+# Weather MCP Server - Kubernetes Manifests
+#
+# Direct kubectl deployment without Ansible
+# Apply in order: namespace → deployment → services → gateway resources
+#
+# Usage:
+#   kubectl apply -f 01-namespace.yaml
+#   kubectl apply -f 02-deployment.yaml
+#   kubectl apply -f 03-services.yaml
+#   kubectl apply -f 04-gateway.yaml
+#   kubectl wait --for=condition=ready pod -l app=weather-mcp -n ai-services --timeout=300s
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-services
+  labels:
+    name: ai-services
+    purpose: mcp-services
