@@ -357,10 +357,14 @@ async def get_hourly_weather(location: str) -> Dict[str, Any]:
 def create_app() -> FastAPI:
     """Create and configure FastAPI application"""
     
+    # Create MCP ASGI app - for mounting, don't specify path here
+    mcp_app = mcp.http_app()
+    
     app = FastAPI(
         title="Weather MCP Server",
         description="MCP server for weather data using Open-Meteo API (no API key required!)",
-        version="2.0.0"
+        version="2.0.0",
+        lifespan=mcp_app.lifespan  # Critical: pass MCP lifespan for session management
     )
     
     @app.get("/")
@@ -375,7 +379,7 @@ def create_app() -> FastAPI:
                 "health": "/health",
                 "weather": "/weather?location=<city>",
                 "docs": "/docs",
-                "mcp": "/mcp/* (SSE endpoint)"
+                "mcp": "/mcp (MCP protocol endpoint)"
             }
         }
     
@@ -412,8 +416,14 @@ def create_app() -> FastAPI:
             logger.error(f"Error fetching weather: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
     
-    # Mount MCP SSE endpoint (deprecated warning is normal, still works fine)
-    app.mount("/mcp", mcp.sse_app())
+    # For HTTP transport, return the MCP app directly instead of mounting
+    if os.getenv("MCP_TRANSPORT", "stdio").lower() == "http" and os.getenv("MCP_ONLY", "false").lower() == "true":
+        # Return only the MCP app for pure MCP HTTP server
+        return mcp_app
+    
+    # Mount MCP server using the FastMCP HTTP transport
+    # Based on FastMCP documentation, mount at root path with specific prefix
+    app.mount("/mcp", mcp_app)
     
     return app
 
@@ -441,10 +451,12 @@ def main():
         print("="*50)
         for route in app.routes:
             if hasattr(route, 'methods') and hasattr(route, 'path'):
-                methods = ', '.join(route.methods)
-                print(f"  {methods:8} {route.path}")
+                # Handle different method types
+                methods = route.methods if isinstance(route.methods, (list, set, tuple)) else [str(route.methods)]
+                methods_str = ', '.join(methods) if methods else 'UNKNOWN'
+                print(f"  {methods_str:8} {route.path}")
             elif hasattr(route, 'path'):
-                print(f"  MOUNT    {route.path} -> MCP SSE")
+                print(f"  MOUNT    {route.path} -> MCP App")
         print("="*50 + "\n")
         
         uvicorn.run(app, host=host, port=port, log_level="info")

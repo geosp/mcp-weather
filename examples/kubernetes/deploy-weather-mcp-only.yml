@@ -1,0 +1,377 @@
+---
+# Weather MCP-Only Server Kubernetes Deployment
+# 
+# This playbook deploys a pure MCP protocol server for AI assistant integration:
+# - MCP_ONLY=true for pure protocol mode
+# - No REST API endpoints (focused deployment)
+# - Optimized for MCP client connections
+# - Single service, single purpose architecture
+#
+# Prerequisites:
+# - Kubernetes cluster with K-Gateway installed
+# - kubectl configured with appropriate permissions
+# - agentgateway HTTPRoute already configured
+#
+# Usage:
+#   ansible-playbook deploy-weather-mcp-only.yml
+#
+- name: Deploy Pure Weather MCP Protocol Server
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../../group_vars/all.yml
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/../../../kubeconfig"
+    kubectl_cmd: "kubectl --kubeconfig={{ kubeconfig_path }}"
+    ai_namespace: "ai-services"
+    kgateway_namespace: "kgateway-system"
+
+    # MCP-only service configuration
+    weather_image: "ghcr.io/geosp/mcp-weather:master"
+    service_name: "weather-mcp-only"
+    service_port: 3001
+    
+    # Pure MCP protocol - no REST API
+    mcp_only_mode: true
+
+  tasks:
+    # Phase 0: Prerequisites
+    - name: Check if kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_file
+
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig file not found at {{ kubeconfig_path }}"
+      when: not kubeconfig_file.stat.exists
+
+    # Phase 1: Pure MCP Protocol Deployment
+    - name: Deploy Weather MCP-Only server
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ service_name }}"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-protocol
+              service-type: ai-assistant
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: "{{ service_name }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ service_name }}"
+                  component: mcp-protocol
+              spec:
+                containers:
+                  - name: "{{ service_name }}"
+                    image: "{{ weather_image }}"
+                    command: ["uvx"]
+                    args: ["--transport", "http", "--host", "0.0.0.0", "--port", "{{ service_port | string }}"]
+                    env:
+                      - name: MCP_TRANSPORT
+                        value: "http"
+                      - name: MCP_PORT
+                        value: "{{ service_port | string }}"
+                      - name: MCP_HOST
+                        value: "0.0.0.0"
+                      - name: MCP_ONLY
+                        value: "true"
+                    ports:
+                      - containerPort: "{{ service_port }}"
+                        name: mcp-protocol
+                        protocol: TCP
+                    livenessProbe:
+                      tcpSocket:
+                        port: "{{ service_port }}"
+                      initialDelaySeconds: 10
+                      periodSeconds: 30
+                      timeoutSeconds: 5
+                      failureThreshold: 3
+                    readinessProbe:
+                      tcpSocket:
+                        port: "{{ service_port }}"
+                      initialDelaySeconds: 5
+                      periodSeconds: 10
+                      timeoutSeconds: 3
+                      failureThreshold: 2
+                    resources:
+                      requests:
+                        memory: "128Mi"
+                        cpu: "100m"
+                      limits:
+                        memory: "256Mi"
+                        cpu: "500m"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_condition:
+          type: Progressing
+          status: "True"
+          reason: NewReplicaSetAvailable
+        wait_timeout: 300
+
+    # Phase 2: ClusterIP Service for Internal Communication
+    - name: Apply Weather MCP-Only ClusterIP service
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ service_name }}"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-protocol
+          spec:
+            type: ClusterIP
+            selector:
+              app: "{{ service_name }}"
+            ports:
+              - port: 80
+                targetPort: "{{ service_port }}"
+                name: mcp-protocol
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 3: LoadBalancer Service for External MCP Client Access
+    - name: Create Weather MCP-Only external LoadBalancer service
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ service_name }}-external"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-protocol
+              exposure: external
+          spec:
+            type: LoadBalancer
+            selector:
+              app: "{{ service_name }}"
+            ports:
+              - port: "{{ service_port }}"
+                targetPort: "{{ service_port }}"
+                name: mcp-protocol
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 120
+
+    # Phase 4: K-Gateway Integration - Static Backend
+    - name: Create Static Backend for Weather MCP-Only (pure protocol)
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.kgateway.dev/v1alpha1
+          kind: Backend
+          metadata:
+            name: "{{ service_name }}-backend"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-protocol
+          spec:
+            type: Static
+            static:
+              hosts:
+                - "{{ service_name }}.{{ ai_namespace }}.svc.cluster.local:80"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 5: HTTPRoute for MCP Protocol Access
+    - name: Create HTTPRoute for Weather MCP-Only Protocol
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: "{{ service_name }}-route"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-protocol
+          spec:
+            parentRefs:
+              - name: agentgateway
+                namespace: "{{ kgateway_namespace }}"
+            hostnames:
+              - agentgateway.mixwarecs-home.net
+            rules:
+              - matches:
+                  - path:
+                      type: PathPrefix
+                      value: "/weather-mcp/"
+                backendRefs:
+                  - group: gateway.kgateway.dev
+                    kind: Backend
+                    name: "{{ service_name }}-backend"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 6: TrafficPolicy to disable authentication for MCP Protocol
+    - name: Create TrafficPolicy to disable authentication for Weather MCP-Only
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.kgateway.dev/v1alpha1
+          kind: TrafficPolicy
+          metadata:
+            name: "disable-{{ service_name }}-auth"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-protocol
+          spec:
+            targetRefs:
+              - group: gateway.networking.k8s.io
+                kind: HTTPRoute
+                name: "{{ service_name }}-route"
+            extAuth:
+              disable: {}
+            rbac:
+              action: Allow
+              policy:
+                matchExpressions:
+                  - "true"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 7: Verification and Status Checks
+    - name: Wait for HTTPRoute to be accepted
+      kubernetes.core.k8s_info:
+        api_version: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        name: "{{ service_name }}-route"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: route_status
+      until: >
+        route_status.resources[0].status.parents[0].conditions | 
+        selectattr('type', 'equalto', 'Accepted') | 
+        selectattr('status', 'equalto', 'True') | 
+        list | length > 0
+      retries: 20
+      delay: 10
+
+    - name: Wait for deployment to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ service_name }}"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: deployment_status
+      until: >
+        deployment_status.resources[0].status.readyReplicas is defined and
+        deployment_status.resources[0].status.readyReplicas == 2
+      retries: 30
+      delay: 10
+
+    - name: Wait for external LoadBalancer IP
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: "{{ service_name }}-external"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: external_service
+      until: >
+        external_service.resources[0].status.loadBalancer.ingress is defined and
+        external_service.resources[0].status.loadBalancer.ingress | length > 0
+      retries: 20
+      delay: 15
+      ignore_errors: true
+
+    # Phase 8: Test MCP Protocol Connectivity
+    - name: Test pure MCP protocol connectivity (TCP check)
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "{{ service_name }}-protocol-test"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: test
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: mcp-test
+                    image: nicolaka/netshoot:latest
+                    command: ["sh", "-c"]
+                    args:
+                      - |
+                        echo "Testing MCP Protocol Connectivity..."
+                        echo "Internal Service: {{ service_name }}.{{ ai_namespace }}.svc.cluster.local:80"
+                        
+                        # Test internal connectivity
+                        nc -zv {{ service_name }}.{{ ai_namespace }}.svc.cluster.local 80
+                        
+                        if [ $? -eq 0 ]; then
+                          echo "✅ Internal MCP protocol port is accessible"
+                        else
+                          echo "❌ Internal MCP protocol port is not accessible"
+                          exit 1
+                        fi
+                        
+                        echo "✅ MCP-Only service connectivity test passed"
+                restartPolicy: Never
+            backoffLimit: 3
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_condition:
+          type: Complete
+          status: "True"
+        wait_timeout: 120
+
+    # Phase 9: Deployment Summary
+    - name: Display deployment summary
+      debug:
+        msg: |
+          
+          ============ Weather MCP-Only Deployment Complete ============
+          
+          🎯 Pure MCP Protocol Service Deployed Successfully!
+          
+          Service Details:
+          📦 Deployment: {{ service_name }}
+          🌐 Service: {{ service_name }}.{{ ai_namespace }}.svc.cluster.local:80
+          🔗 External: {{ service_name }}-external (LoadBalancer)
+          🛣️  Route: /weather-mcp/* → Pure MCP Protocol
+          
+          MCP Configuration:
+          ✅ MCP_ONLY=true (Pure protocol mode)
+          ✅ No REST API endpoints
+          ✅ Direct MCP JSON-RPC at root path
+          ✅ Port {{ service_port }} for MCP clients
+          
+          Gateway Integration:
+          ✅ K-Gateway routing configured
+          ✅ Authentication disabled for MCP access
+          ✅ Static backend for reliable connectivity
+          
+          Client Connection:
+          📍 Internal: http://{{ service_name }}.{{ ai_namespace }}.svc.cluster.local
+          📍 External: https://agentgateway.mixwarecs-home.net/weather-mcp/
+          📍 LoadBalancer: {% if external_service.resources[0].status.loadBalancer.ingress is defined %}"{{ external_service.resources[0].status.loadBalancer.ingress[0].ip }}":"{{ service_port }}"{% else %}Pending{% endif %}
+          
+          🔧 MCP Client Usage:
+          # Connect directly to root (no /mcp path needed)
+          Client('https://agentgateway.mixwarecs-home.net/weather-mcp/')
+          
+          📋 Available MCP Tools:
+          - get_hourly_weather(location) - Weather data for any city
+          
+          =======================================================================

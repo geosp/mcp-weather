@@ -449,6 +449,112 @@ rbac:
   action: Allow
 ```
 
+### 🎯 **Critical Discovery: REST API vs MCP Protocol Compatibility**
+
+During development and testing, we discovered an **important limitation** in the FastMCP framework regarding simultaneous REST API and MCP protocol support:
+
+#### **The Issue**
+When attempting to serve both REST API endpoints and MCP protocol from the same FastAPI application:
+
+- ✅ **REST API works** when MCP app is mounted at `/mcp` 
+- ❌ **MCP protocol fails** with "Session terminated" errors when mounted
+- ✅ **MCP protocol works** only in `MCP_ONLY=true` mode (pure MCP app)
+
+#### **Root Cause**
+The FastMCP HTTP application has specific requirements for:
+- Session management and lifespan handling
+- WebSocket/HTTP upgrade handling  
+- Protocol-specific middleware
+
+When mounted as a sub-application in FastAPI, these mechanisms get interfered with, causing the MCP protocol handshake to fail.
+
+#### **Production Solution: Dual Service Architecture**
+
+For maximum reliability, deploy **two separate services**:
+
+##### **Service 1: REST API Service** 
+```bash
+# Standard web API on port 3000
+MCP_TRANSPORT=http MCP_PORT=3000 uv run python -m mcp_weather.weather
+```
+**Endpoints:**
+- ✅ `/weather?location=city` - REST API for web clients
+- ✅ `/health` - Health checks for monitoring
+- ✅ `/docs` - OpenAPI documentation
+- ✅ `/` - Service information
+
+##### **Service 2: Pure MCP Protocol Service**
+```bash
+# Pure MCP protocol on port 3001  
+MCP_TRANSPORT=http MCP_PORT=3001 MCP_ONLY=true uv run python -m mcp_weather.weather
+```
+**Features:**
+- ✅ Pure MCP JSON-RPC protocol for AI assistants
+- ✅ Clean session management without mounting complications
+- ✅ Dedicated port for MCP clients
+
+#### **Kubernetes Deployment Strategy**
+
+```yaml
+# REST API Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-api
+spec:
+  template:
+    spec:
+      containers:
+      - name: weather-api
+        env:
+        - name: MCP_TRANSPORT
+          value: "http"
+        - name: MCP_PORT
+          value: "3000"
+        # MCP_ONLY defaults to false = REST API mode
+
+---
+# MCP Protocol Deployment  
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-mcp
+spec:
+  template:
+    spec:
+      containers:
+      - name: weather-mcp
+        env:
+        - name: MCP_TRANSPORT
+          value: "http"
+        - name: MCP_PORT
+          value: "3001"
+        - name: MCP_ONLY
+          value: "true"
+        # Pure MCP protocol mode
+```
+
+#### **Benefits of Dual Service Architecture**
+
+1. **🔒 Reliability**: Each service optimized for its specific protocol
+2. **📈 Scaling**: Independent scaling based on usage patterns
+3. **🛡️ Isolation**: Issues in one service don't affect the other
+4. **🔧 Maintenance**: Simpler debugging and service management
+5. **🌐 Flexibility**: Different clients can use appropriate endpoints
+
+#### **Alternative: Current Hybrid Approach**
+
+The current implementation uses Specbridge as a bridge:
+```
+AI Client ←(MCP)→ Specbridge ←(HTTP REST)→ Weather Service
+```
+
+This works well because:
+- ✅ REST API service focuses on HTTP
+- ✅ Specbridge handles MCP protocol conversion
+- ✅ No mounting complications within FastMCP
+- ✅ Production-tested architecture
+
 #### When to Use This Pattern
 
 **✅ Use HTTP MCP + Gateway Integration when:**
