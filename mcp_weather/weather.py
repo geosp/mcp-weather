@@ -56,6 +56,7 @@ from fastmcp import FastMCP
 from dotenv import load_dotenv
 from aiohttp import ClientSession
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 import uvicorn
 
@@ -507,6 +508,21 @@ def create_app() -> FastAPI:
         description="MCP server for weather data using Open-Meteo API (no API key required!)",
         version="2.0.0",
         lifespan=mcp_app.lifespan  # Critical: pass MCP lifespan for session management
+    )
+    
+    # Add CORS middleware to handle OPTIONS requests for OpenAPI endpoints
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",
+            "http://localhost:8080", 
+            "https://agentgateway.mixwarecs-home.net",
+            "http://agentgateway.mixwarecs-home.net",
+            "*"  # Allow all origins for development - restrict in production
+        ],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
     )
     
     @app.get("/")
