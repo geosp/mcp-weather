@@ -1,603 +1,394 @@
 # Weather MCP Server
 
-A Model Context Protocol (MCP) server that provides weather tools by bridging a REST weather service to MCP clients through OpenAPI specification conversion using Specbridge.
+A Model Context Protocol (MCP) server that provides weather tools using FastMCP 2.0 framework with both MCP protocol and REST API support.
 
 ## Overview
 
-This project demonstrates a complete MCP weather integration with two main components:
-1. **FastMCP Weather Service** - A Python-based weather API using Open-Meteo data
-2. **Specbridge MCP Bridge** - Converts the deployed weather service to MCP tools
+This project provides a comprehensive weather service with multiple deployment options:
 
-## Project Architecture
+1. **Dynamic MCP Deployment** - Pure MCP protocol with K-Gateway integration (RECOMMENDED)
+2. **REST API Deployment** - Standard HTTP API with OpenAPI documentation  
+3. **Manual Manifests** - Basic kubectl deployment for development
 
+## Features
+
+- ✅ **FastMCP 2.0** - Modern MCP framework with HTTP transport
+- ✅ **Pure MCP Mode** - `MCP_ONLY=true` for protocol-only operation
+- ✅ **REST API Mode** - `MCP_ONLY=false` for HTTP + FastAPI integration
+- ✅ **Open-Meteo Integration** - Free weather data (no API key required)
+- ✅ **Kubernetes Ready** - Production deployment with K-Gateway
+- ✅ **Dynamic Backend** - Auto-discovery with label selectors
+- ✅ **VS Code Integration** - Direct MCP extension support
+
+## Architecture Comparison
+
+### Dynamic MCP (Recommended)
 ```
-MCP Client (AI Assistant) ←→ GitHub Copilot
-    ↓ (stdio via mcp.json)
-Specbridge MCP Server (Node.js)
-    ↓ (HTTP REST)
-Deployed Weather Service API (FastMCP/Python)
-    ↓ (API calls)
-Open-Meteo Weather Data (External API)
+GitHub Copilot ←→ VS Code MCP Extension ←→ HTTP ←→ K-Gateway (MCP Backend)
+                                                       ↓ /weather-dynamic/*
+                                                   Weather Service (MCP)
+                                                       ↓ HTTP
+                                                   Open-Meteo API
 ```
+
+### REST API
+```
+HTTP Client ←→ K-Gateway (Static Backend) ←→ Weather Service (REST)
+Browser           ↓ /weather-api/*              ↓ FastAPI + OpenAPI
+curl, Postman     ↓                             ↓ HTTP
+                  ↓                         Open-Meteo API
+```
+
+## Quick Start
+
+### Option 1: Dynamic MCP (For MCP Tools)
+```bash
+cd examples/kubernetes
+ansible-playbook deploy-weather-mcp-dynamic.yml
+```
+
+**Then configure VS Code MCP extension** in `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "weather-dynamic-http": {
+      "type": "http",
+      "url": "http://agentgateway.mixwarecs-home.net/weather-dynamic/"
+    }
+  }
+}
+```
+
+### Option 2: REST API (For HTTP Clients)
+```bash
+cd examples/kubernetes  
+ansible-playbook deploy-weather-rest-api.yml
+```
+
+**Test with curl:**
+```bash
+curl "http://agentgateway.mixwarecs-home.net/weather-api/weather?location=Paris"
+curl http://agentgateway.mixwarecs-home.net/weather-api/docs
+```
+
+### Option 3: Manual Deployment (Development)
+```bash
+cd examples/kubernetes/manifests/mcp-dynamic
+kubectl apply -f 01-namespace.yaml
+kubectl apply -f 02-deployment.yaml
+kubectl apply -f 03-service.yaml
+kubectl apply -f 04-gateway.yaml
+```
+
+## VS Code MCP Integration
+
+After deploying the Dynamic MCP service, configure VS Code MCP extension in `.vscode/mcp.json`:
+
+### Production Configuration (Recommended)
+```json
+{
+  "servers": {
+    "weather-dynamic-http": {
+      "type": "http",
+      "url": "http://agentgateway.mixwarecs-home.net/weather-dynamic/"
+    }
+  },
+  "inputs": []
+}
+```
+
+### Complete Configuration Example
+This example shows a production setup with local development options:
+
+```json
+{
+  "servers": {
+    // Active: Dynamic MCP deployment (production)
+    "weather-dynamic-http": {
+      "type": "http", 
+      "url": "http://agentgateway.mixwarecs-home.net/weather-dynamic/"
+    },
+    
+    // Local development (uncomment for local testing)
+    // MCP_ONLY=true uv run python -m mcp_weather.weather --transport http --port 8000
+    // "weather-local": {
+    //   "type": "http",
+    //   "url": "http://localhost:8000/"
+    // },
+    
+    // Legacy stdio configurations (kept for reference)
+    // "weather-direct": {
+    //   "type": "stdio", 
+    //   "command": "/path/to/python",
+    //   "args": ["-m", "mcp_weather.weather"]
+    // }
+  },
+  "inputs": []
+}
+```
+
+### Testing MCP Integration
+
+After configuring `.vscode/mcp.json`:
+
+1. **Restart VS Code** to load the new MCP configuration
+2. **Open GitHub Copilot Chat** 
+3. **Test weather queries:**
+   ```
+   "What's the weather in Tokyo?"
+   "Get weather forecast for Madrid" 
+   "How's the weather in your location?" (if location detection works)
+   ```
+
+### Configuration Tips
+
+- **Use HTTP type** for deployed services (not stdio)
+- **URL should end with `/`** for proper routing
+- **Match the deployment path** (`/weather-dynamic/` for Dynamic MCP)
+- **Keep local options commented** for easy development switching
+- **Restart VS Code** after configuration changes
 
 ## Project Structure
 
 ```
 mcp-weather/
-├── README.md                      # This documentation
+├── README.md                                    # This documentation
 ├── .vscode/
-│   └── mcp.json                   # MCP client configuration for Copilot
-├── specs/
-│   └── weather-service.json       # OpenAPI spec downloaded from service
-├── mcp_weather/                   # Python FastMCP weather service source
+│   └── mcp.json                                # MCP client configuration
+├── mcp_weather/                                # Python FastMCP weather service
 │   ├── __init__.py
-│   └── weather.py                 # Main weather service implementation
-├── examples/                      # Deployment examples
-│   ├── README.md                  # Examples overview
-│   └── kubernetes/                # Kubernetes deployment examples
-│       ├── deploy-weather-mcp.yml # Ansible playbook (full automation)
-│       └── manifests/             # kubectl YAML files (manual deployment)
-├── pyproject.toml                 # Python dependencies and build config
-├── Dockerfile                     # Container for deploying weather service
+│   └── weather.py                              # Main weather service implementation
+├── examples/                                   # Deployment examples
+│   ├── README.md                               # Examples overview
+│   └── kubernetes/                             # Kubernetes deployment examples
+│       ├── deploy-weather-mcp-dynamic.yml      # Dynamic MCP deployment (RECOMMENDED)
+│       ├── deploy-weather-rest-api.yml         # REST API deployment
+│       ├── cleanup-weather-mcp-dynamic.yml     # Dynamic MCP cleanup
+│       ├── cleanup-weather-rest-api.yml        # REST API cleanup
+│       └── manifests/                          # Manual kubectl deployment
+│           ├── mcp-dynamic/                    # MCP with Dynamic Backend
+│           └── rest-api/                       # REST with Static Backend
+├── pyproject.toml                              # Python dependencies and build config
+├── Dockerfile                                  # Container for deploying weather service
 ├── .github/workflows/
-│   └── docker-publish.yml         # CI/CD for container deployment
-├── uv.lock                        # Python dependency lock file
-└── specbridge.log                 # MCP server logs
+│   └── docker-publish.yml                     # CI/CD for container deployment
+└── uv.lock                                    # Python dependency lock file
 ```
 
-## MCP Transport Concepts
+## Deployment Options
 
-The Model Context Protocol (MCP) supports different transport mechanisms for client-server communication. Understanding these is crucial for deployment architecture:
+### 1. Dynamic MCP Deployment (RECOMMENDED)
+**Best for:** VS Code MCP extension, GitHub Copilot, MCP tools
 
-### Transport Types
-
-#### 1. **stdio (Standard Input/Output)**
-- **Use Case**: Direct client integration (GitHub Copilot, VS Code, Claude Desktop)
-- **Communication**: Process spawning with stdin/stdout pipes
-- **Protocol**: JSON-RPC over stdio streams
-- **Example**: Specbridge running as MCP server for Copilot
-- **Benefits**: Simple setup, process isolation, direct control
-- **Configuration**: 
-  ```json
-  {
-    "type": "stdio",
-    "command": "/path/to/node",
-    "args": ["/path/to/specbridge", "--specs", "/specs/dir"]
-  }
-  ```
-
-#### 2. **HTTP Transport**
-- **Use Case**: Service deployments, production environments, multiple clients
-- **Communication**: HTTP REST API endpoints
-- **Protocol**: JSON-RPC over HTTP
-- **Example**: Weather service deployed on Kubernetes
-- **Benefits**: Scalability, load balancing, standard web infrastructure
-- **Configuration**:
-  ```yaml
-  args: ["--transport", "http", "--host", "0.0.0.0", "--port", "8000"]
-  ```
-
-### Our Hybrid Architecture
-
-This project demonstrates **both transport patterns**:
-
-```
-MCP Client (Copilot) ←→ stdio ←→ Specbridge (Local Process)
-                                      ↓ HTTP REST
-                              Weather Service (Kubernetes)
-                                      ↓ HTTP API
-                              Open-Meteo (External API)
-```
-
-**Why this hybrid approach?**
-1. **Client Integration**: stdio for direct MCP protocol with Copilot
-2. **Service Deployment**: HTTP for scalable, production-ready weather API
-3. **Protocol Bridge**: Specbridge converts HTTP REST → MCP tools
-4. **Flexibility**: Can swap weather backends without changing MCP client
-
-## Components
-
-### 1. FastMCP Weather Service (Python)
-- **Source**: `mcp_weather/weather.py`
-- **Framework**: FastMCP + FastAPI
-- **Transport**: **HTTP** (deployed as web service)
-- **Data Source**: Open-Meteo API (no API key required)
-- **Deployment**: `http://agentgateway.mixwarecs-home.net/weather-service`
-- **Features**: Location caching, comprehensive weather data, error handling
-- **Container**: Kubernetes deployment with 2 replicas, health checks, load balancing
-
-### 2. Specbridge MCP Bridge (Node.js)
-- **Purpose**: Converts REST API to MCP tools via OpenAPI specs
-- **Transport**: **stdio** (spawned by MCP client)
-- **Installation**: `npm install -g specbridge`
-- **Version**: 1.0.2
-- **Process Model**: Local process managed by VS Code/Copilot
-- **Communication**: JSON-RPC over stdin/stdout to HTTP REST calls
-
-### 3. OpenAPI Specification
-- **File**: `specs/weather-service.json`
-- **Source**: Auto-downloaded from deployed service
-- **Enhancement**: Added proper server URL for Specbridge integration
-- **Purpose**: Enables automatic tool generation from REST endpoints
-
-## Deployment Architecture
-
-### Kubernetes Production Deployment
-
-The Ansible playbook you referenced demonstrates a **production-grade deployment** with multiple infrastructure components:
-
-#### Service Infrastructure Components
-
-1. **Weather MCP Container**
-   ```yaml
-   # HTTP Transport Configuration
-   args: ["--transport", "http", "--host", "0.0.0.0", "--port", "8000"]
-   ```
-   - **Transport**: HTTP for scalable web service
-   - **Replicas**: 2 for high availability  
-   - **Health Checks**: Liveness and readiness probes
-   - **Resource Limits**: CPU/memory constraints for stability
-
-2. **Kubernetes Services**
-   ```yaml
-   # Internal ClusterIP for cluster communication
-   weather-mcp.ai-services.svc.cluster.local:80
-   
-   # External LoadBalancer for direct access
-   LoadBalancer IP:8000
-   ```
-
-3. **K-Gateway Integration** (Key Innovation)
-   ```yaml
-   # Static Backend - Bypasses Authentication
-   type: Static
-   hosts: weather-mcp.ai-services.svc.cluster.local:80
-   ```
-
-#### Service-Based Routing Pattern
-
-**Why Service-Based Routes?**
-Traditional API routing exposes individual endpoints:
-```
-/weather → weather endpoint
-/health → health endpoint  
-/openapi.json → spec endpoint
-```
-
-**Service-based routing** groups related endpoints under a service prefix:
-```
-/weather-service/weather → weather endpoint
-/weather-service/health → health endpoint
-/weather-service/openapi.json → spec endpoint
-```
-
-**Benefits:**
-- **Namespace Isolation**: Multiple services can coexist
-- **Gateway Management**: Single route rule handles all endpoints
-- **Authentication Scope**: Policies apply to entire service
-- **Service Discovery**: Clear service boundaries for tools
-
-#### Authentication Bypass Strategy
-
-**The Problem**: K-Gateway typically requires session management and authentication for all routes.
-
-**The Solution**: Static Backend + TrafficPolicy
-```yaml
-# 1. Static Backend bypasses session management
-spec:
-  type: Static  # Key: No dynamic backend resolution
-  static:
-    hosts: [weather-mcp.ai-services.svc.cluster.local:80]
-
-# 2. TrafficPolicy disables authentication
-spec:
-  extAuth:
-    disable: {}  # Key: Explicitly disable auth
-  rbac:
-    action: Allow
-    policy:
-      matchExpressions: ["true"]  # Allow all requests
-```
-
-**Why This Works:**
-- **Static Backend**: Bypasses K-Gateway's normal session management pipeline
-- **Disabled ExtAuth**: No external authentication required
-- **Open RBAC**: Allow policy for all requests
-- **Service Isolation**: Only affects `/weather-service/*` routes
-
-### Transport Protocol Flow
-
-```
-GitHub Copilot Chat
-    ↓ (stdio JSON-RPC)
-Specbridge MCP Server (Local Node.js Process)
-    ↓ (HTTP REST)
-K-Gateway (agentgateway.mixwarecs-home.net)
-    ↓ (/weather-service/* → Static Backend)
-Weather Service (Kubernetes Pod)
-    ↓ (HTTP API)
-Open-Meteo Weather API (External)
-```
-
-**Key Transport Decisions:**
-1. **Client → Specbridge**: stdio for direct MCP integration
-2. **Specbridge → Gateway**: HTTP for standard web protocols
-3. **Gateway → Service**: HTTP with service discovery
-4. **Service → External**: HTTP for weather data
-
-### Ansible Deployment Phases Explained
-
-The Ansible playbook demonstrates a **10-phase deployment strategy** for production MCP services:
-
-#### Phase 0: Prerequisites
-- Validates kubeconfig exists
-- Ensures cluster connectivity
-
-#### Phase 1: Core Service Deployment
-```yaml
-# HTTP Transport Weather Service
-containers:
-  - name: weather-mcp
-    command: ["uvx"]
-    args: ["--transport", "http", "--host", "0.0.0.0", "--port", "8000"]
-```
-- **Why HTTP?** Enables load balancing, health checks, multiple replicas
-- **Why uvx?** Zero-dependency Python execution from git repository
-- **Production Features**: Resource limits, health probes, monitoring annotations
-
-#### Phase 2: Service Discovery
-```yaml
-# ClusterIP for internal communication
-Service: weather-mcp.ai-services.svc.cluster.local:80
-
-# LoadBalancer for external access
-Service: External IP:8000
-```
-- **Internal**: Cluster DNS resolution for K-Gateway
-- **External**: Direct access for testing and development
-
-#### Phase 3: K-Gateway Static Backend
-```yaml
-type: Static
-static:
-  hosts: [weather-mcp.ai-services.svc.cluster.local:80]
-```
-- **Critical Design**: Bypasses K-Gateway session management
-- **No Authentication**: Static backends skip normal auth pipeline
-- **Direct Routing**: Routes directly to service without user context
-
-#### Phase 4: Service-Based HTTPRoute
-```yaml
-rules:
-  - matches:
-      - path: 
-          type: PathPrefix
-          value: /weather-service  # Service prefix
-    filters:
-      - type: URLRewrite
-        urlRewrite:
-          path:
-            replacePrefixMatch: /  # Strip prefix before forwarding
-```
-- **URL Transformation**: `/weather-service/weather` → `/weather`
-- **Prefix Matching**: All `/weather-service/*` routes handled
-- **Gateway Integration**: Attaches to existing agentgateway
-
-#### Phase 5: Authentication Disable
-```yaml
-TrafficPolicy:
-  extAuth:
-    disable: {}  # Disable external auth
-  rbac:
-    action: Allow
-    policy:
-      matchExpressions: ["true"]  # Allow all
-```
-- **Complete Bypass**: No authentication or authorization required
-- **Open Access**: Essential for MCP tool integration
-- **Scoped Policy**: Only affects weather service routes
-
-#### Phase 6-7: Validation & Readiness
-- **Route Acceptance**: Waits for K-Gateway to accept routes
-- **Deployment Ready**: Ensures all replicas are healthy
-- **LoadBalancer**: Waits for external IP assignment
-
-#### Phase 8: Integration Testing
-```bash
-# Service-based endpoint testing
-curl http://agentgateway.mixwarecs-home.net/weather-service/weather?location=Atlanta
-curl http://agentgateway.mixwarecs-home.net/weather-service/health
-curl http://agentgateway.mixwarecs-home.net/weather-service/openapi.json
-```
-- **Comprehensive Validation**: Tests all endpoints through gateway
-- **Retry Logic**: Handles service startup timing
-- **End-to-end**: Validates complete request path
-
-#### Phase 9: Cleanup Legacy Resources
-- Removes old individual route configurations
-- Cleans up outdated authentication policies
-- Ensures clean service-based deployment
-
-#### Phase 10: Production Summary
-- **Service Endpoints**: All `/weather-service/*` routes documented
-- **LoadBalancer Info**: External access details provided
-- **Test Commands**: Ready-to-use validation commands
-
-### Why This Deployment Pattern Works for MCP
-
-1. **HTTP Service Layer**: Weather service runs as standard web service
-   - Kubernetes native (pods, services, ingress)
-   - Standard monitoring and logging
-   - Horizontal scaling capabilities
-
-2. **Gateway Integration**: K-Gateway provides enterprise features
-   - Service routing and discovery
-   - Traffic policies and rate limiting
-   - Authentication bypass for public tools
-
-3. **MCP Bridge Layer**: Specbridge converts HTTP → MCP
-   - No changes needed to weather service
-   - Automatic tool generation from OpenAPI
-   - stdio transport for direct client integration
-
-4. **Client Integration**: Standard MCP protocol
-   - Works with any MCP client (Copilot, Claude, etc.)
-   - No weather service deployment details exposed
-   - Simple configuration via `mcp.json`
-
-### MCP Transport Design Decisions
-
-#### Hybrid Architecture Rationale
-
-**Question**: Why not use MCP stdio transport end-to-end?
-
-**Answer**: Different transport types optimize for different requirements:
-
-| Requirement | stdio Transport | HTTP Transport |
-|-------------|----------------|----------------|
-| **Client Integration** | ✅ Direct MCP protocol | ❌ Requires HTTP→MCP bridge |
-| **Service Deployment** | ❌ Process management complexity | ✅ Standard web deployment |
-| **Load Balancing** | ❌ Single process per client | ✅ Multiple replicas, load balancer |
-| **Health Monitoring** | ❌ Process lifecycle only | ✅ HTTP health checks, metrics |
-| **Service Discovery** | ❌ Manual process management | ✅ Kubernetes DNS, service mesh |
-| **Authentication** | ❌ Process-level security | ✅ Gateway policies, RBAC |
-| **Development** | ✅ Simple local testing | ❌ Requires service deployment |
-| **Production Ops** | ❌ Custom process monitoring | ✅ Standard container orchestration |
-
-#### Transport Selection Guidelines
-
-**Use stdio MCP when:**
-- Direct client integration (Copilot, Claude Desktop)
-- Simple development and testing
-- Single-user or local scenarios
-- Custom MCP protocol features needed
-
-**Use HTTP MCP when:**
-- Production service deployment
-- Multiple clients or high availability
-- Standard web infrastructure integration
-- Enterprise security and monitoring requirements
-
-**Use Hybrid (Our Approach) when:**
-- Need both client integration AND service deployment
-- Want to leverage existing HTTP services as MCP tools
-- Require production-grade service deployment with MCP clients
-- Converting existing REST APIs to MCP without rewriting
-
-#### Alternative Architecture Patterns
-
-**Pattern 1: Pure stdio MCP**
-```
-Copilot ←→ stdio ←→ MCP Weather Server (Local Process)
-                         ↓ HTTP
-                   Open-Meteo API
-```
-- **Pros**: Simple MCP setup, direct protocol
-- **Cons**: No service deployment, single process, manual scaling
-
-**Pattern 2: Pure HTTP MCP**
-```
-Copilot ←→ HTTP ←→ MCP Weather Server (Web Service)
-                         ↓ HTTP  
-                   Open-Meteo API
-```
-- **Pros**: Standard web deployment, full production features
-- **Cons**: MCP client needs HTTP transport support, more complex
-
-**Pattern 3: Hybrid (Our Choice)**
-```
-Copilot ←→ stdio ←→ Specbridge ←→ HTTP ←→ Weather Service
-                                           ↓ HTTP
-                                     Open-Meteo API
-```
-- **Pros**: Best of both worlds, existing service integration, production ready
-- **Cons**: Additional component (Specbridge), slightly more complex
-
-### Production Considerations
-
-#### Security Implications
-- **stdio Transport**: Process-level isolation, no network exposure
-- **HTTP Transport**: Network security, authentication, authorization required
-- **Hybrid**: stdio isolation for client + HTTP security for service layer
-
-#### Scaling Patterns
-- **stdio**: One process per MCP client connection
-- **HTTP**: Horizontal scaling, load balancing, replica management
-- **Hybrid**: Client processes scale independently from service replicas
-
-#### Monitoring and Observability
-- **stdio**: Process logs, limited metrics
-- **HTTP**: Full HTTP metrics, health checks, distributed tracing
-- **Hybrid**: Both process monitoring and service observability
-
-### MCP Deployment Ecosystem
-
-#### Deployment Pattern Summary
-
-Your Ansible playbook demonstrates **Enterprise MCP Integration** - converting existing production services into MCP tools:
-
-```yaml
-# Key Pattern: HTTP MCP Service + Gateway Integration
-weather_image: "ghcr.io/geosp/mcp-weather:master"
-command: ["uvx"]
-args: ["--transport", "http", "--host", "0.0.0.0", "--port", "8000"]
-
-# Key Pattern: Authentication Bypass for Tool Access
-extAuth:
-  disable: {}  # Essential for MCP tool integration
-rbac:
-  action: Allow
-```
-
-### 🎯 **Critical Discovery: REST API vs MCP Protocol Compatibility**
-
-During development and testing, we discovered an **important limitation** in the FastMCP framework regarding simultaneous REST API and MCP protocol support:
-
-#### **The Issue**
-When attempting to serve both REST API endpoints and MCP protocol from the same FastAPI application:
-
-- ✅ **REST API works** when MCP app is mounted at `/mcp` 
-- ❌ **MCP protocol fails** with "Session terminated" errors when mounted
-- ✅ **MCP protocol works** only in `MCP_ONLY=true` mode (pure MCP app)
-
-#### **Root Cause**
-The FastMCP HTTP application has specific requirements for:
-- Session management and lifespan handling
-- WebSocket/HTTP upgrade handling  
-- Protocol-specific middleware
-
-When mounted as a sub-application in FastAPI, these mechanisms get interfered with, causing the MCP protocol handshake to fail.
-
-#### **Production Solution: Dual Service Architecture**
-
-For maximum reliability, deploy **two separate services**:
-
-##### **Service 1: REST API Service** 
-```bash
-# Standard web API on port 3000
-MCP_TRANSPORT=http MCP_PORT=3000 uv run python -m mcp_weather.weather
-```
-**Endpoints:**
-- ✅ `/weather?location=city` - REST API for web clients
-- ✅ `/health` - Health checks for monitoring
-- ✅ `/docs` - OpenAPI documentation
-- ✅ `/` - Service information
-
-##### **Service 2: Pure MCP Protocol Service**
-```bash
-# Pure MCP protocol on port 3001  
-MCP_TRANSPORT=http MCP_PORT=3001 MCP_ONLY=true uv run python -m mcp_weather.weather
-```
 **Features:**
-- ✅ Pure MCP JSON-RPC protocol for AI assistants
-- ✅ Clean session management without mounting complications
-- ✅ Dedicated port for MCP clients
+- ✅ Pure MCP protocol (`MCP_ONLY=true`)
+- ✅ Dynamic Backend with label selectors
+- ✅ StreamableHTTP transport protocol
+- ✅ Shows as "MCP Service" in K-Gateway UI
+- ✅ Auto-discovery and scaling
 
-#### **Kubernetes Deployment Strategy**
-
-```yaml
-# REST API Deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: weather-api
-spec:
-  template:
-    spec:
-      containers:
-      - name: weather-api
-        env:
-        - name: MCP_TRANSPORT
-          value: "http"
-        - name: MCP_PORT
-          value: "3000"
-        # MCP_ONLY defaults to false = REST API mode
-
----
-# MCP Protocol Deployment  
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: weather-mcp
-spec:
-  template:
-    spec:
-      containers:
-      - name: weather-mcp
-        env:
-        - name: MCP_TRANSPORT
-          value: "http"
-        - name: MCP_PORT
-          value: "3001"
-        - name: MCP_ONLY
-          value: "true"
-        # Pure MCP protocol mode
+**Usage:**
+```bash
+cd examples/kubernetes
+ansible-playbook deploy-weather-mcp-dynamic.yml
 ```
 
-#### **Benefits of Dual Service Architecture**
-
-1. **🔒 Reliability**: Each service optimized for its specific protocol
-2. **📈 Scaling**: Independent scaling based on usage patterns
-3. **🛡️ Isolation**: Issues in one service don't affect the other
-4. **🔧 Maintenance**: Simpler debugging and service management
-5. **🌐 Flexibility**: Different clients can use appropriate endpoints
-
-#### **Alternative: Current Hybrid Approach**
-
-The current implementation uses Specbridge as a bridge:
-```
-AI Client ←(MCP)→ Specbridge ←(HTTP REST)→ Weather Service
-```
-
-This works well because:
-- ✅ REST API service focuses on HTTP
-- ✅ Specbridge handles MCP protocol conversion
-- ✅ No mounting complications within FastMCP
-- ✅ Production-tested architecture
-
-#### When to Use This Pattern
-
-**✅ Use HTTP MCP + Gateway Integration when:**
-- Converting existing REST services to MCP tools
-- Need production-grade deployment (HA, monitoring, scaling)
-- Multiple MCP clients will access the same service
-- Enterprise infrastructure with API gateways
-- Compliance requirements for service deployment
-- Want to expose services to both MCP and traditional HTTP clients
-
-**❌ Don't use this pattern when:**
-- Simple development or personal use cases
-- Single MCP client scenarios
-- Services don't need high availability
-- Prefer simpler stdio deployment
-
-#### Comparison with Other MCP Patterns
-
-**1. Traditional stdio MCP (Simple)**
+**Access:** Configure in `.vscode/mcp.json`:
 ```json
-// .mcp.json
 {
   "servers": {
-    "weather": {
-      "type": "stdio",
-      "command": "python",
-      "args": ["-m", "mcp_weather"]
+    "weather-dynamic-http": {
+      "type": "http",
+      "url": "http://agentgateway.mixwarecs-home.net/weather-dynamic/"
     }
   }
 }
 ```
-- **Use Case**: Development, single-user, simple tools
-- **Deployment**: Local process execution
-- **Scaling**: One process per client
 
-**2. HTTP MCP Direct (Intermediate)**
-```json
-// .mcp.json  
-{
-  "servers": {
-    "weather": {
-      "type": "http",
-      "endpoint": "http://localhost:8000/mcp"
+### 2. REST API Deployment
+**Best for:** Web applications, HTTP clients, API documentation
+
+**Features:**
+- ✅ REST + FastAPI mode (`MCP_ONLY=false`)
+- ✅ Static Backend with explicit routing
+- ✅ OpenAPI documentation at `/docs`
+- ✅ CORS enabled for browser access
+- ✅ Interactive Swagger UI
+
+**Usage:**
+```bash
+cd examples/kubernetes
+ansible-playbook deploy-weather-rest-api.yml
+```
+
+**Endpoints:**
+- Health: `http://agentgateway.mixwarecs-home.net/weather-api/health`
+- Weather: `http://agentgateway.mixwarecs-home.net/weather-api/weather?location=Paris`
+- Docs: `http://agentgateway.mixwarecs-home.net/weather-api/docs`
+
+### 3. Manual Manifests
+**Best for:** Development, testing, learning
+
+See `examples/kubernetes/manifests/` for kubectl-based deployment.
+
+## Key Technical Concepts
+
+### MCP Protocol Modes
+
+#### MCP_ONLY=true (Pure MCP)
+- **Purpose:** Direct MCP protocol for AI tools
+- **Transport:** StreamableHTTP for proper K-Gateway recognition
+- **Backend:** Dynamic with label selectors
+- **Client:** VS Code MCP extension, GitHub Copilot
+- **UI Recognition:** Shows as "MCP Service" in K-Gateway
+
+#### MCP_ONLY=false (REST + MCP)
+- **Purpose:** HTTP API with FastAPI integration
+- **Transport:** Standard HTTP protocol
+- **Backend:** Static with explicit host/port
+- **Client:** Browsers, curl, HTTP libraries
+- **UI Recognition:** Shows as "Static" in K-Gateway
+
+### Backend Types
+
+#### Dynamic Backend (MCP)
+```yaml
+spec:
+  type: MCP
+  selector:
+    matchLabels:
+      app: weather-mcp-dynamic
+      component: mcp-server
+```
+- ✅ Auto-discovery via label selectors
+- ✅ Proper MCP type recognition
+- ✅ Scales with service replicas
+- ✅ Service mesh integration
+
+#### Static Backend (REST)
+```yaml
+spec:
+  type: Static
+  static:
+    hosts:
+      - host: weather-rest-api.ai-services.svc.cluster.local
+        port: 80
+```
+- ✅ Explicit routing configuration
+- ✅ Standard HTTP load balancing
+- ✅ CORS and traffic policies
+- ❌ Manual configuration required
+
+### K-Gateway Integration
+
+Both deployment types integrate with K-Gateway but appear differently:
+
+| Feature | Dynamic MCP | Static REST |
+|---------|-------------|-------------|
+| **UI Display** | "MCP Service" | "Static" |
+| **Discovery** | Automatic | Manual |
+| **Protocol** | StreamableHTTP | HTTP |
+| **Auth Bypass** | Supported | Supported |
+| **Scaling** | Auto | Manual |
+
+## Components
+
+### FastMCP Weather Service
+- **Framework:** FastMCP 2.0 with FastAPI integration
+- **Transport:** HTTP with configurable MCP modes
+- **Data Source:** Open-Meteo API (free, no API key required)
+- **Deployment:** Kubernetes with K-Gateway integration
+- **Features:** Location-based weather, caching, error handling
+
+### Environment Variables
+```bash
+# Core configuration
+MCP_TRANSPORT=http          # Transport protocol
+MCP_HOST=0.0.0.0           # Bind address
+MCP_PORT=8000              # Service port
+
+# Mode selection
+MCP_ONLY=true              # Pure MCP protocol (recommended for tools)
+MCP_ONLY=false             # REST + MCP mode (recommended for HTTP clients)
+```
+
+### Deployment Validation
+
+Both deployment options include comprehensive testing:
+
+#### Dynamic MCP Testing
+```bash
+# Health check via K-Gateway
+curl http://agentgateway.mixwarecs-home.net/weather-dynamic/health
+
+# MCP integration test (VS Code)
+# Configure .vscode/mcp.json and test in GitHub Copilot:
+# "What's the weather in Tokyo?"
+```
+
+#### REST API Testing  
+```bash
+# Health check
+curl http://agentgateway.mixwarecs-home.net/weather-api/health
+
+# Weather API
+curl "http://agentgateway.mixwarecs-home.net/weather-api/weather?location=Rome"
+
+# OpenAPI documentation
+curl http://agentgateway.mixwarecs-home.net/weather-api/openapi.json
+
+# Interactive docs
+open http://agentgateway.mixwarecs-home.net/weather-api/docs
+```
+
+## Production Considerations
+
+### When to Use Dynamic MCP
+- ✅ **MCP tool integration** (VS Code, GitHub Copilot)
+- ✅ **Direct protocol support** needed
+- ✅ **Service auto-discovery** preferred
+- ✅ **K-Gateway MCP recognition** important
+
+### When to Use REST API
+- ✅ **Web application integration**
+- ✅ **OpenAPI documentation** needed
+- ✅ **CORS support** for browsers
+- ✅ **Standard HTTP clients**
+
+### Security and Authentication
+
+Both deployments use K-Gateway TrafficPolicy to disable authentication:
+
+```yaml
+spec:
+  authConfig:
+    disabled: true  # Required for tool access
+```
+
+**Important:** This is intentional for MCP tool integration. For production, consider:
+- Restricting access by IP/network
+- Using separate authenticated endpoints for management
+- Monitoring usage patterns
+
+### Scaling and High Availability
+
+Both deployments support:
+- **2 replicas** by default
+- **Health checks** with automatic restart
+- **Resource limits** for stability
+- **Load balancing** via Kubernetes services
+
+## Cleanup
+
+Each deployment includes cleanup automation:
+
+```bash
+# Clean up Dynamic MCP deployment
+ansible-playbook cleanup-weather-mcp-dynamic.yml
+
+# Clean up REST API deployment
+ansible-playbook cleanup-weather-rest-api.yml
+```
     }
   }
 }
@@ -893,53 +684,140 @@ Test deployed weather service:
 curl "http://agentgateway.mixwarecs-home.net/weather-service/weather?location=Paris"
 ```
 
+## Development
+
+### Local Development
+```bash
+# Clone repository
+git clone https://github.com/geosp/mcp-weather.git
+cd mcp-weather
+
+# Install dependencies
+uv sync
+
+# Run MCP-only mode (for MCP tools)
+MCP_ONLY=true uv run python -m mcp_weather.weather --transport http --port 8000
+
+# Run REST API mode (for HTTP clients)  
+MCP_ONLY=false uv run python -m mcp_weather.weather --transport http --port 8000
+```
+
+### Container Development
+```bash
+# Build container
+docker build -t mcp-weather .
+
+# Run MCP mode
+docker run -p 8000:8000 -e MCP_ONLY=true mcp-weather
+
+# Run REST mode
+docker run -p 8000:8000 -e MCP_ONLY=false mcp-weather
+```
+
+### Testing Locally
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Weather API (REST mode only)
+curl "http://localhost:8000/weather?location=Paris"
+
+# MCP protocol test (MCP mode only, requires MCP client)
+# Configure .vscode/mcp.json with http://localhost:8000/
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**1. "Session terminated" errors in MCP mode**
+- Ensure `MCP_ONLY=true` is set
+- Verify no FastAPI mounting is occurring
+- Check VS Code MCP extension configuration
+
+**2. K-Gateway shows "Static" instead of "MCP Service"**
+- Verify Backend `type: MCP` is set
+- Check label selectors match service labels
+- Ensure StreamableHTTP appProtocol is configured
+
+**3. CORS errors in REST API**
+- Check TrafficPolicy CORS configuration
+- Verify allowOrigins uses full URL format
+- Ensure browser requests include proper headers
+
+**4. Authentication blocked**
+- Verify TrafficPolicy has `authConfig.disabled: true`
+- Check HTTPRoute is properly targeted by policy
+- Ensure gateway configuration allows the route
+
+### Debug Commands
+```bash
+# Check Kubernetes resources
+kubectl get pods,svc,backend,httproute,trafficpolicy -n ai-services
+
+# Check logs
+kubectl logs -n ai-services -l app=weather-mcp-dynamic -f
+kubectl logs -n ai-services -l app=weather-rest-api -f
+
+# Test connectivity
+kubectl port-forward -n ai-services svc/weather-mcp-dynamic 8000:80
+curl http://localhost:8000/health
+```
+
 ## Technical Details
 
 ### Weather Service Implementation
 - **Language**: Python 3.11+
-- **Framework**: FastMCP + FastAPI  
+- **Framework**: FastMCP 2.0 + FastAPI
 - **Dependencies**: aiohttp, uvicorn, python-dotenv
 - **Features**: Location caching, comprehensive error handling
-- **Container**: Docker with uvx entrypoint
+- **Container**: Docker with uvx entrypoint for git-based installation
 
 ### MCP Protocol Integration
 - **Protocol Version**: 2024-11-05
-- **Transport**: stdio (JSON-RPC over stdin/stdout)
-- **Communication**: JSON-RPC 2.0
-- **Client**: GitHub Copilot with mcp.json configuration
+- **Transport**: HTTP with StreamableHTTP (not stdio)
+- **Communication**: JSON-RPC 2.0 over HTTP
+- **Client**: VS Code MCP extension with direct HTTP integration
 
 ### API Endpoints
-- `GET /weather?location={city}` - Get weather data
-- `GET /health` - Health check
-- `GET /openapi.json` - OpenAPI specification  
-- `GET /` - API information
+
+#### MCP Mode (MCP_ONLY=true)
+- **MCP Protocol**: JSON-RPC over HTTP at root path
+- **Health Check**: `GET /health`
+
+#### REST Mode (MCP_ONLY=false)  
+- **Weather API**: `GET /weather?location={city}`
+- **Health Check**: `GET /health`
+- **OpenAPI Spec**: `GET /openapi.json`
+- **API Docs**: `GET /docs`
+- **Redoc**: `GET /redoc`
 
 ### Dependencies
-- **Runtime**: Node.js v24.9.0, Python 3.11+
-- **MCP Bridge**: Specbridge 1.0.2
-- **Python Packages**: FastMCP, FastAPI, aiohttp, uvicorn
-- **External APIs**: Open-Meteo (free, no API key)
+- **Runtime**: Python 3.11+, Kubernetes, K-Gateway
+- **Python Packages**: FastMCP 2.0, FastAPI, aiohttp, uvicorn
+- **External APIs**: Open-Meteo (free, no API key required)
+- **Infrastructure**: K-Gateway, Kubernetes Gateway API
 
-## Deployment
+## Summary
 
-### Container Deployment
-```bash
-docker build -t mcp-weather .
-docker run -p 3000:3000 mcp-weather mcp-weather
-```
+This project demonstrates modern MCP deployment patterns with:
 
-### CI/CD
-- **Workflow**: `.github/workflows/docker-publish.yml`
-- **Registry**: GitHub Container Registry
-- **Trigger**: Push to main branch
+- ✅ **FastMCP 2.0** - Latest MCP framework features
+- ✅ **Dual deployment modes** - MCP protocol and REST API
+- ✅ **Production Kubernetes** - High availability and scaling
+- ✅ **K-Gateway integration** - Enterprise routing and policies
+- ✅ **Backend type optimization** - Dynamic MCP vs Static REST
+- ✅ **Comprehensive testing** - Automated validation and cleanup
+
+Choose **Dynamic MCP** for MCP tool integration or **REST API** for HTTP client integration based on your use case.
 
 ## Related Documentation
 
 - [Model Context Protocol](https://modelcontextprotocol.io/)
-- [Specbridge GitHub](https://github.com/modelcontextprotocol/specbridge)  
-- [FastMCP Documentation](https://github.com/jlowin/fastmcp)
+- [FastMCP Framework](https://github.com/jlowin/fastmcp)
 - [Open-Meteo API](https://open-meteo.com/)
-- [GitHub Copilot Extensions](https://docs.github.com/en/copilot)
+- [K-Gateway Documentation](https://docs.kgateway.dev/)
+- [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/)
 
 ## License
 

@@ -1,0 +1,10 @@
+# AI Services Namespace
+# Shared namespace for AI/MCP services
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-services
+  labels:
+    name: ai-services
+    purpose: ai-mcp-services

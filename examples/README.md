@@ -6,60 +6,82 @@ This directory contains examples for deploying the Weather MCP Server in differe
 
 ### Kubernetes Deployment (`kubernetes/`)
 
-Production-grade deployment using Ansible and K-Gateway integration.
+Production-grade deployment using Ansible and K-Gateway integration with multiple deployment options:
+
+#### 1. MCP-Only Deployment (Dynamic Backend) - **RECOMMENDED**
+**File:** `deploy-weather-mcp-dynamic.yml`
 
 **Features:**
+- ✅ Pure MCP protocol with StreamableHTTP transport
+- ✅ Dynamic Backend with label selectors for auto-discovery
 - ✅ High availability (2 replicas)
-- ✅ Service-based routing (`/weather-service/*`)
-- ✅ Authentication bypass for MCP tool access
+- ✅ Service-based routing (`/weather-dynamic/*`)
+- ✅ Proper MCP transport type recognition in K-Gateway UI
 - ✅ Health monitoring and resource limits
 - ✅ Comprehensive testing and validation
-- ✅ LoadBalancer for external access
 
-**Prerequisites:**
-- Kubernetes cluster with K-Gateway installed
-- Ansible with `kubernetes.core` collection
-- kubectl configured with cluster access
-- Existing `agentgateway` HTTPRoute
+**Architecture:**
+```
+GitHub Copilot ←→ VS Code MCP ←→ HTTP ←→ K-Gateway ←→ Weather Service (MCP)
+                                          ↓ /weather-dynamic/*
+                                      Open-Meteo API
+```
 
 **Quick Start:**
 ```bash
 cd examples/kubernetes
-# Update variables in deploy-weather-mcp.yml
-ansible-playbook deploy-weather-mcp.yml
+ansible-playbook deploy-weather-mcp-dynamic.yml
 ```
 
-**What it deploys:**
-1. **Weather MCP Deployment** - HTTP transport weather service
-2. **Kubernetes Services** - ClusterIP + LoadBalancer
-3. **K-Gateway Static Backend** - Bypasses authentication
-4. **HTTPRoute** - Service-based routing with URL rewriting
-5. **TrafficPolicy** - Disables auth for `/weather-service/*`
+#### 2. REST API Deployment (Static Backend)
+**File:** `deploy-weather-rest-api.yml`
 
-**Deployment Architecture:**
+**Features:**
+- ✅ Standard REST API with FastAPI integration
+- ✅ Static Backend for HTTP API routing
+- ✅ OpenAPI documentation at `/weather-api/docs`
+- ✅ CORS enabled for UI access
+- ✅ Service-based routing (`/weather-api/*`)
+- ✅ REST-only mode (MCP_ONLY=false)
+
+**Architecture:**
 ```
-Client (Copilot) ←→ stdio ←→ Specbridge (Local)
-                                  ↓ HTTP
-                              K-Gateway
-                                  ↓ /weather-service/*
-                              Weather Service (K8s)
-                                  ↓ HTTP
-                              Open-Meteo API
+HTTP Client ←→ K-Gateway ←→ Weather Service (REST API)
+                ↓ /weather-api/*
+            Open-Meteo API
 ```
+
+**Quick Start:**
+```bash
+cd examples/kubernetes
+ansible-playbook deploy-weather-rest-api.yml
+```
+
+#### 3. Manual Manifest Deployment
+**Directory:** `manifests/`
+
+Direct kubectl deployment without Ansible for simple setups.
+
+### Prerequisites
+
+- Kubernetes cluster with K-Gateway installed
+- Ansible with `kubernetes.core` collection
+- kubectl configured with cluster access
+- Existing `agentgateway` Gateway resource in kgateway-system namespace
 
 ## Deployment Pattern Comparison
 
-| Pattern | Use Case | Complexity | Scalability | Production Ready |
-|---------|----------|------------|-------------|------------------|
-| **stdio Only** | Development, testing | Low | Single process | ❌ |
-| **HTTP Direct** | Simple deployment | Medium | Manual scaling | ⚠️ |
-| **K8s + Gateway** | Enterprise production | High | Auto-scaling | ✅ |
+| Deployment Type | Use Case | Protocol | Backend Type | UI Recognition | Production Ready |
+|----------------|----------|----------|--------------|----------------|------------------|
+| **MCP Dynamic** | MCP tools integration | StreamableHTTP | MCP + labels | ✅ MCP Service | ✅ |
+| **REST API** | HTTP/REST clients | HTTP | Static | ❌ Static | ✅ |
+| **Manual** | Development/testing | HTTP | Static | ❌ Static | ⚠️ |
 
 ## Configuration Variables
 
-### Kubernetes Example
+### Common Variables (All Deployments)
 
-Key variables to customize in `deploy-weather-mcp.yml`:
+Key variables to customize in deployment files:
 
 ```yaml
 # Cluster Configuration
@@ -72,7 +94,34 @@ weather_image: "ghcr.io/geosp/mcp-weather:master"
 
 # Gateway Configuration
 gateway_hostname: "agentgateway.mixwarecs-home.net"
-service_prefix: "/weather-service"
+```
+
+### MCP Dynamic Deployment Specific
+
+```yaml
+# MCP Configuration
+mcp_only_mode: true
+service_prefix: "/weather-dynamic"
+
+# Backend uses label selectors for auto-discovery
+backend_type: "MCP"
+selector_labels:
+  app: "weather-mcp-dynamic"
+  component: "mcp-server"
+```
+
+### REST API Deployment Specific
+
+```yaml
+# REST Configuration
+rest_only_mode: true
+service_prefix: "/weather-api"
+
+# Static backend with explicit host/port
+backend_type: "Static"
+static_hosts:
+  - host: "weather-rest-api.ai-services.svc.cluster.local"
+    port: 80
 ```
 
 ### Environment-Specific Customization
@@ -94,49 +143,64 @@ service_prefix: "/weather-service"
 - Add monitoring and alerting
 - Configure backup and disaster recovery
 
-## Testing Deployment
+## Testing Deployments
 
-### Automated Tests (Included)
+### MCP Dynamic Deployment Tests
 
-The Kubernetes playbook includes comprehensive testing:
+The MCP Dynamic playbook includes comprehensive testing:
+
+```bash
+# Health check via K-Gateway
+curl http://agentgateway.mixwarecs-home.net/weather-dynamic/health
+
+# Direct MCP protocol test (requires MCP client)
+# Configured in .vscode/mcp.json for VS Code integration
+```
+
+### REST API Deployment Tests
+
+The REST API playbook includes comprehensive testing:
 
 ```bash
 # Health check
-curl http://agentgateway.mixwarecs-home.net/weather-service/health
+curl http://agentgateway.mixwarecs-home.net/weather-api/health
 
 # Weather API
-curl "http://agentgateway.mixwarecs-home.net/weather-service/weather?location=Paris"
+curl "http://agentgateway.mixwarecs-home.net/weather-api/weather?location=Paris"
 
 # OpenAPI specification
-curl http://agentgateway.mixwarecs-home.net/weather-service/openapi.json
+curl http://agentgateway.mixwarecs-home.net/weather-api/openapi.json
+
+# Interactive API documentation
+open http://agentgateway.mixwarecs-home.net/weather-api/docs
 ```
 
-### MCP Integration Test
+### MCP Integration Test (Dynamic Deployment)
 
-After deployment, test MCP integration:
+After MCP Dynamic deployment, test integration with VS Code:
 
-1. **Download OpenAPI spec:**
-   ```bash
-   curl -s http://agentgateway.mixwarecs-home.net/weather-service/openapi.json > specs/weather-service.json
-   ```
-
-2. **Update MCP configuration** (`.vscode/mcp.json`):
+1. **Update MCP configuration** (`.vscode/mcp.json`):
    ```json
    {
      "servers": {
-       "weather-specbridge": {
-         "type": "stdio",
-         "command": "/path/to/node",
-         "args": ["/path/to/specbridge", "--specs", "/path/to/specs"]
+       "weather-dynamic-http": {
+         "type": "http",
+         "url": "http://agentgateway.mixwarecs-home.net/weather-dynamic/"
        }
      }
    }
    ```
 
-3. **Test in GitHub Copilot:**
+2. **Test in GitHub Copilot:**
    ```
    "What's the weather in Tokyo?"
+   "Get weather forecast for Madrid"
    ```
+
+3. **Verify in K-Gateway UI:**
+   - Navigate to K-Gateway management interface
+   - Check "MCP Services" section
+   - Should show "weather-mcp-dynamic" as MCP Service type
 
 ## Troubleshooting
 
@@ -144,9 +208,88 @@ After deployment, test MCP integration:
 
 **1. Route not accepted:**
 ```bash
-kubectl get httproute weather-service-route -n ai-services -o yaml
+kubectl get httproute weather-mcp-dynamic-route -n ai-services -o yaml
 # Check status.parents[].conditions for acceptance
 ```
+
+**2. Backend not recognized as MCP type:**
+```bash
+kubectl get backend weather-mcp-dynamic-backend -n ai-services -o yaml
+# Verify labels and MCP type configuration
+```
+
+**3. Service discovery issues:**
+```bash
+kubectl get service weather-mcp-dynamic -n ai-services
+kubectl describe backend weather-mcp-dynamic-backend -n ai-services
+# Check label selectors match service labels
+```
+
+**4. TrafficPolicy authentication:**
+```bash
+kubectl get trafficpolicy weather-mcp-dynamic-policy -n ai-services -o yaml
+# Verify authConfig.disabled: true
+```
+
+**5. REST API CORS errors:**
+```bash
+kubectl get trafficpolicy weather-rest-api-policy -n ai-services -o yaml
+# Check CORS allowOrigins format (must be full URLs)
+```
+
+## Environment-Specific Customization
+
+### Development Environment
+- Use single replica: `replicas: 1`
+- Reduce resources: `requests: {cpu: 50m, memory: 128Mi}`
+- Use NodePort for direct access
+- Enable debug logging: `MCP_DEBUG=true`
+
+### Staging Environment
+- Use staging image tags: `weather_image: "ghcr.io/geosp/mcp-weather:staging"`
+- Add staging annotations
+- Use staging-specific hostnames
+
+### Production Environment
+- Use specific release tags: `weather_image: "ghcr.io/geosp/mcp-weather:v1.0.0"`
+- Increase resources: `requests: {cpu: 200m, memory: 512Mi}`
+- Add monitoring and alerting
+- Configure backup strategies
+
+## Cleanup
+
+Each deployment includes cleanup playbooks:
+
+```bash
+# Clean up MCP Dynamic deployment
+ansible-playbook cleanup-weather-mcp-dynamic.yml
+
+# Clean up REST API deployment  
+ansible-playbook cleanup-weather-rest-api.yml
+
+# Clean up manual manifests
+kubectl delete -f manifests/
+```
+
+## Architecture Decision Records
+
+### Why Dynamic MCP Backend?
+- **Auto-discovery**: Label selectors automatically detect MCP services
+- **UI Recognition**: K-Gateway properly identifies as "MCP Service"
+- **Protocol Native**: Uses StreamableHTTP for proper MCP transport
+- **Scalability**: Works with multiple replicas and service mesh
+
+### Why Static Backend for REST?
+- **HTTP Protocol**: Standard REST API doesn't use MCP transport
+- **Direct Routing**: Explicit host/port configuration for HTTP routing
+- **Documentation**: Serves OpenAPI docs and interactive Swagger UI
+- **CORS Support**: Enables web browser access to API endpoints
+
+### Transport Protocol Comparison
+| Transport | Use Case | K-Gateway Recognition | Client Integration |
+|-----------|----------|----------------------|-------------------|
+| **StreamableHTTP** | MCP tools | ✅ MCP Service | VS Code MCP extension |
+| **HTTP** | REST APIs | ❌ Static | curl, browsers, HTTP clients |
 
 **2. Service not ready:**
 ```bash

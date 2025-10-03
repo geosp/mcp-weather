@@ -1,0 +1,426 @@
+---
+# Weather Dynamic MCP Server Kubernetes Deployment
+# 
+# This playbook deploys a weather MCP server using Dynamic MCP with label selectors
+# for automatic K-Gateway discovery and proper MCP type detection:
+# - Uses label selectors instead of static host/port configuration
+# - Automatic MCP protocol detection by K-Gateway
+# - Streamable HTTP transport (required for dynamic discovery)
+# - Better integration with K-Gateway UI
+#
+# Prerequisites:
+# - Kubernetes cluster with K-Gateway installed
+# - kubectl configured with appropriate permissions
+# - agentgateway Gateway already configured
+#
+# Usage:
+#   ansible-playbook deploy-weather-mcp-dynamic.yml
+#   ansible-playbook deploy-weather-mcp-dynamic.yml -e test_endpoint=external
+#   ansible-playbook deploy-weather-mcp-dynamic.yml -e test_endpoint=gateway
+#
+# Test Endpoint Options:
+#   internal - Test via cluster internal service (default)
+#   external - Test via LoadBalancer external IP  
+#   gateway  - Test via K-Gateway route
+#
+- name: Deploy Weather MCP Server with Dynamic Discovery
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../../group_vars/all.yml
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/../../../kubeconfig"
+    kubectl_cmd: "kubectl --kubeconfig={{ kubeconfig_path }}"
+    ai_namespace: "ai-services"
+    kgateway_namespace: "kgateway-system"
+
+    # MCP service configuration
+    weather_image: "ghcr.io/geosp/mcp-weather:master"
+    service_name: "weather-mcp-dynamic"
+    service_port: 3001
+    
+    # Pure MCP protocol - no REST API
+    mcp_only_mode: true
+    
+    # MCP test configuration
+    test_mcp_endpoint: "{{ test_endpoint | default('internal') }}"  # Options: internal, external, gateway
+
+  tasks:
+    # Phase 0: Prerequisites
+    - name: Check if kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_file
+
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig file not found at {{ kubeconfig_path }}"
+      when: not kubeconfig_file.stat.exists
+
+    # Phase 1: MCP Server Deployment (following Dynamic MCP pattern)
+    - name: Deploy Weather MCP server with proper labels for dynamic discovery
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ service_name }}"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-server
+              service-type: ai-assistant
+              mcp-type: weather
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: "{{ service_name }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ service_name }}"
+                  component: mcp-server
+                  mcp-type: weather
+              spec:
+                containers:
+                  - name: "{{ service_name }}"
+                    image: "{{ weather_image }}"
+                    command: ["uvx"]
+                    args:
+                      - "--from"
+                      - "git+https://github.com/geosp/mcp-weather"
+                      - "mcp-weather"
+                      - "--transport"
+                      - "http"
+                      - "--host"
+                      - "0.0.0.0"
+                      - "--port"
+                      - "{{ service_port | string }}"
+                    env:
+                      - name: MCP_TRANSPORT
+                        value: "http"
+                      - name: MCP_PORT
+                        value: "{{ service_port | string }}"
+                      - name: MCP_HOST
+                        value: "0.0.0.0"
+                      - name: MCP_ONLY
+                        value: "true"
+                    ports:
+                      - containerPort: "{{ service_port }}"
+                        name: mcp-http
+                        protocol: TCP
+                    livenessProbe:
+                      tcpSocket:
+                        port: "{{ service_port }}"
+                      initialDelaySeconds: 10
+                      periodSeconds: 30
+                      timeoutSeconds: 5
+                      failureThreshold: 3
+                    readinessProbe:
+                      tcpSocket:
+                        port: "{{ service_port }}"
+                      initialDelaySeconds: 5
+                      periodSeconds: 10
+                      timeoutSeconds: 3
+                      failureThreshold: 2
+                    resources:
+                      requests:
+                        memory: "128Mi"
+                        cpu: "100m"
+                      limits:
+                        memory: "256Mi"
+                        cpu: "500m"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_condition:
+          type: Progressing
+          status: "True"
+          reason: NewReplicaSetAvailable
+        wait_timeout: 300
+
+    # Phase 2: MCP Service (following Dynamic MCP pattern with required annotations)
+    - name: Apply Weather MCP service with Dynamic MCP annotations
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ service_name }}"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-server
+              mcp-type: weather
+            annotations:
+              # Optional: Default is /mcp for StreamableHTTP
+              kgateway.dev/mcp-path: "/mcp"
+          spec:
+            selector:
+              app: "{{ service_name }}"
+            ports:
+              - protocol: TCP
+                port: "{{ service_port }}"
+                targetPort: "{{ service_port }}"
+                # Required: Configure service to use MCP protocol
+                appProtocol: kgateway.dev/mcp
+            type: ClusterIP
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 3: Dynamic MCP Backend (using label selectors)
+    - name: Create Dynamic MCP Backend for Weather (uses label selectors)
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.kgateway.dev/v1alpha1
+          kind: Backend
+          metadata:
+            name: "{{ service_name }}-backend"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-backend
+          spec:
+            # Dynamic MCP type for automatic discovery
+            type: MCP
+            mcp:
+              targets:
+                - name: "{{ service_name }}"
+                  # Use selector instead of static host/port
+                  selector:
+                    service:
+                      matchLabels:
+                        app: "{{ service_name }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 4: HTTPRoute for MCP Protocol Access
+    - name: Create HTTPRoute for Weather Dynamic MCP
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: "{{ service_name }}-route"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-route
+          spec:
+            parentRefs:
+              - name: agentgateway
+                namespace: "{{ kgateway_namespace }}"
+            hostnames:
+              - agentgateway.mixwarecs-home.net
+            rules:
+              - matches:
+                  - path:
+                      type: PathPrefix
+                      value: "/weather-mcp-dynamic/"
+                backendRefs:
+                  - group: gateway.kgateway.dev
+                    kind: Backend
+                    name: "{{ service_name }}-backend"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 5: TrafficPolicy to disable authentication for MCP Protocol
+    - name: Create TrafficPolicy to disable authentication for Weather Dynamic MCP
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.kgateway.dev/v1alpha1
+          kind: TrafficPolicy
+          metadata:
+            name: "{{ service_name }}-no-auth"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: mcp-policy
+          spec:
+            targetRefs:
+              - group: gateway.networking.k8s.io
+                kind: HTTPRoute
+                name: "{{ service_name }}-route"
+            config:
+              authConfig:
+                disabled: true
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 6: Deployment Verification
+    - name: Wait for deployment to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ service_name }}"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+
+    - name: Get deployment status
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ service_name }}"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: deployment_status
+
+    - name: Display deployment status
+      debug:
+        msg: |
+          Weather Dynamic MCP Deployment Status:
+          - Name: {{ deployment_status.resources[0].metadata.name }}
+          - Namespace: {{ deployment_status.resources[0].metadata.namespace }}
+          - Replicas: {{ deployment_status.resources[0].status.replicas | default(0) }}/{{ deployment_status.resources[0].spec.replicas }}
+          - Ready Replicas: {{ deployment_status.resources[0].status.readyReplicas | default(0) }}
+          - Available Replicas: {{ deployment_status.resources[0].status.availableReplicas | default(0) }}
+
+    # Phase 7: Service and Backend Status
+    - name: Get service status
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: "{{ service_name }}"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: service_status
+
+    - name: Get backend status
+      kubernetes.core.k8s_info:
+        api_version: gateway.kgateway.dev/v1alpha1
+        kind: Backend
+        name: "{{ service_name }}-backend"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: backend_status
+
+    - name: Display service configuration
+      debug:
+        msg: |
+          Weather Dynamic MCP Service Configuration:
+          - Service Name: {{ service_status.resources[0].metadata.name }}
+          - Cluster IP: {{ service_status.resources[0].spec.clusterIP }}
+          - Port: {{ service_status.resources[0].spec.ports[0].port }}
+          - Target Port: {{ service_status.resources[0].spec.ports[0].targetPort }}
+          - App Protocol: {{ service_status.resources[0].spec.ports[0].appProtocol | default('not set') }}
+          - MCP Path Annotation: {{ service_status.resources[0].metadata.annotations['kgateway.dev/mcp-path'] | default('default') }}
+
+    - name: Display backend configuration
+      debug:
+        msg: |
+          Weather Dynamic MCP Backend Configuration:
+          - Backend Name: {{ backend_status.resources[0].metadata.name }}
+          - Backend Type: {{ backend_status.resources[0].spec.type }}
+          - Target Name: {{ backend_status.resources[0].spec.mcp.targets[0].name }}
+          - Target Type: {{ 'selector' if backend_status.resources[0].spec.mcp.targets[0].selector is defined else 'static' }}
+          - Selector Labels: {{ backend_status.resources[0].spec.mcp.targets[0].selector.service.matchLabels if backend_status.resources[0].spec.mcp.targets[0].selector is defined else 'N/A' }}
+
+    # Phase 8: Test MCP Connection
+    - name: Test MCP connection based on test_mcp_endpoint setting
+      block:
+        # Internal cluster test (default)
+        - name: Test MCP protocol via internal service
+          uri:
+            url: "http://{{ service_status.resources[0].spec.clusterIP }}:{{ service_status.resources[0].spec.ports[0].port }}/mcp"
+            method: POST
+            headers:
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              method: "tools/list"
+              params: {}
+            timeout: 10
+          register: internal_mcp_test
+          when: test_mcp_endpoint == "internal"
+          ignore_errors: true
+
+        - name: Display internal MCP test results
+          debug:
+            msg: |
+              Internal MCP Protocol Test Results:
+              - Status Code: {{ internal_mcp_test.status | default('failed') }}
+              - Response: {{ internal_mcp_test.json | default(internal_mcp_test.msg | default('No response')) }}
+              - URL: http://{{ service_status.resources[0].spec.clusterIP }}:{{ service_status.resources[0].spec.ports[0].port }}/mcp
+          when: test_mcp_endpoint == "internal"
+
+        # Gateway test
+        - name: Test MCP protocol via K-Gateway route
+          uri:
+            url: "http://agentgateway.mixwarecs-home.net/weather-mcp-dynamic/mcp"
+            method: POST
+            headers:
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              method: "tools/list"
+              params: {}
+            timeout: 10
+          register: gateway_mcp_test
+          when: test_mcp_endpoint == "gateway"
+          ignore_errors: true
+
+        - name: Display gateway MCP test results
+          debug:
+            msg: |
+              Gateway MCP Protocol Test Results:
+              - Status Code: {{ gateway_mcp_test.status | default('failed') }}
+              - Response: {{ gateway_mcp_test.json | default(gateway_mcp_test.msg | default('No response')) }}
+              - URL: http://agentgateway.mixwarecs-home.net/weather-mcp-dynamic/mcp
+          when: test_mcp_endpoint == "gateway"
+
+    # Phase 9: Summary and Next Steps
+    - name: Display deployment summary
+      debug:
+        msg: |
+          =====================================================
+          Weather Dynamic MCP Server Deployment Complete!
+          =====================================================
+          
+          Dynamic MCP Configuration:
+          - Deployment: {{ service_name }} ({{ deployment_status.resources[0].status.readyReplicas | default(0) }}/{{ deployment_status.resources[0].spec.replicas }} ready)
+          - Service: {{ service_name }} (ClusterIP: {{ service_status.resources[0].spec.clusterIP }})
+          - Backend: {{ service_name }}-backend (Type: {{ backend_status.resources[0].spec.type }}, Selector-based)
+          - Route: /weather-mcp-dynamic/
+          
+          Key Dynamic MCP Features:
+          - Uses label selectors for automatic service discovery
+          - K-Gateway auto-detects MCP protocol via appProtocol
+          - Better type detection in K-Gateway UI
+          - No static host/port configuration required
+          
+          Access URLs:
+          - Internal: http://{{ service_status.resources[0].spec.clusterIP }}:{{ service_status.resources[0].spec.ports[0].port }}/mcp
+          - Gateway: http://agentgateway.mixwarecs-home.net/weather-mcp-dynamic/mcp
+          
+          Next Steps:
+          1. Check K-Gateway UI for proper MCP type detection
+          2. Verify Backend shows as "MCP" instead of "SSE"
+          3. Test MCP connection via VS Code or MCP Inspector
+          4. Compare with static configuration behavior
+          
+          VS Code MCP Configuration:
+          {
+            "weather-dynamic": {
+              "command": "uvx",
+              "args": ["--from", "git+https://github.com/geosp/mcp-weather", "mcp-weather", "--transport", "http"],
+              "env": {"MCP_TRANSPORT": "http"}
+            }
+          }
+          
+          Or use HTTP transport via K-Gateway:
+          {
+            "weather-dynamic-http": {
+              "transport": {
+                "type": "http",
+                "url": "http://agentgateway.mixwarecs-home.net/weather-mcp-dynamic/"
+              }
+            }
+          }

@@ -1,23 +1,30 @@
 ---
-# Weather MCP Server Cleanup Playbook
+# Weather REST API Server Cleanup Playbook
 # 
-# This playbook removes the exact weather MCP resources deployed by deploy-weather-mcp.yml
+# This playbook removes weather REST API resources deployed by deploy-weather-rest-api.yml
+# Specifically handles:
+# - MCP Backend with OpenAPI target
+# - Services with appProtocol: http
+# - CORS-enabled TrafficPolicy
+# - REST API route configuration
+# 
 # Useful for:
-# - Development iterations
-# - Testing different configurations
-# - Troubleshooting deployment issues
-# - Complete environment reset
+# - Development iterations with REST API
+# - Testing different OpenAPI configurations
+# - Troubleshooting REST deployment issues
+# - Switching from REST back to MCP-only
+# - Complete REST API environment reset
 #
 # Prerequisites:
 # - Kubernetes cluster access
 # - kubectl configured with appropriate permissions
-# - Same kubeconfig used for original deployment
+# - Same kubeconfig used for REST API deployment
 #
 # Usage:
-#   ansible-playbook cleanup-weather-mcp.yml
-#   ansible-playbook cleanup-weather-mcp.yml --extra-vars "force_cleanup=true"
+#   ansible-playbook cleanup-weather-rest-api.yml
+#   ansible-playbook cleanup-weather-rest-api.yml --extra-vars "force_cleanup=true"
 #
-- name: Cleanup Weather MCP Server Resources
+- name: Cleanup Weather REST API Server Resources
   hosts: localhost
   gather_facts: false
   vars_files:
@@ -26,6 +33,10 @@
     kubeconfig_path: "{{ playbook_dir }}/../../../kubeconfig"
     kubectl_cmd: "kubectl --kubeconfig={{ kubeconfig_path }}"
     ai_namespace: "ai-services"
+    kgateway_namespace: "kgateway-system"
+    
+    # REST API service configuration (must match deployment)
+    service_name: "weather-rest-api"
     
     # Cleanup confirmation (can be overridden with --extra-vars "force_cleanup=true")
     force_cleanup: false
@@ -46,17 +57,18 @@
       pause:
         prompt: |
           
-          ⚠️  WARNING: This will remove the following Weather MCP resources ⚠️
+          ⚠️  WARNING: This will remove the following Weather REST API resources ⚠️
           
-          Resources to be deleted (exactly what was deployed):
-          - Job: weather-service-test
-          - TrafficPolicy: disable-weather-service-auth
-          - HTTPRoutes: weather-service-route, weather-api-route, weather-openapi-spec-route
-          - Backend: weather-static-backend
-          - Services: weather-mcp, weather-mcp-external
-          - Deployment: weather-mcp
+          Resources to be deleted (OpenAPI-integrated REST API):
+          - TrafficPolicy: {{ service_name }}-policy (with CORS)
+          - HTTPRoute: {{ service_name }}-route
+          - Backend: {{ service_name }}-backend (MCP with OpenAPI target)
+          - Service: {{ service_name }} (appProtocol: http)
+          - Deployment: {{ service_name }}
           
           Namespace: {{ ai_namespace }}
+          Service Type: REST API (OpenAPI integration)
+          Backend Type: MCP with OpenAPI target
           
           Continue with cleanup? (yes/no)
       register: cleanup_confirmation
@@ -69,25 +81,12 @@
         - not (force_cleanup | default(false) | bool)
         - cleanup_confirmation.user_input | lower not in ['yes', 'y']
 
-    # Phase 1: Stop running test job first (if any)
-    - name: Remove test job
-      kubernetes.core.k8s:
-        api_version: batch/v1
-        kind: Job
-        name: weather-service-test
-        namespace: "{{ ai_namespace }}"
-        state: absent
-        kubeconfig: "{{ kubeconfig_path }}"
-        wait: true
-        wait_timeout: 60
-      ignore_errors: true
-
-    # Phase 2: Remove TrafficPolicy (must be removed before HTTPRoutes)
-    - name: Remove TrafficPolicy
+    # Phase 1: Remove TrafficPolicy (must be removed before HTTPRoute)
+    - name: Remove REST API TrafficPolicy
       kubernetes.core.k8s:
         api_version: gateway.kgateway.dev/v1alpha1
         kind: TrafficPolicy
-        name: disable-weather-service-auth
+        name: "{{ service_name }}-policy"
         namespace: "{{ ai_namespace }}"
         state: absent
         kubeconfig: "{{ kubeconfig_path }}"
@@ -95,29 +94,25 @@
         wait_timeout: 30
       ignore_errors: true
 
-    # Phase 3: Remove HTTPRoutes
-    - name: Remove HTTPRoutes
+    # Phase 2: Remove HTTPRoute
+    - name: Remove REST API HTTPRoute
       kubernetes.core.k8s:
         api_version: gateway.networking.k8s.io/v1
         kind: HTTPRoute
-        name: "{{ item }}"
+        name: "{{ service_name }}-route"
         namespace: "{{ ai_namespace }}"
         state: absent
         kubeconfig: "{{ kubeconfig_path }}"
         wait: true
         wait_timeout: 30
-      loop:
-        - weather-service-route
-        - weather-api-route
-        - weather-openapi-spec-route
       ignore_errors: true
 
-    # Phase 4: Remove Backend
-    - name: Remove Static Backend
+    # Phase 3: Remove MCP Backend (with OpenAPI target)
+    - name: Remove REST API Backend
       kubernetes.core.k8s:
         api_version: gateway.kgateway.dev/v1alpha1
         kind: Backend
-        name: weather-static-backend
+        name: "{{ service_name }}-backend"
         namespace: "{{ ai_namespace }}"
         state: absent
         kubeconfig: "{{ kubeconfig_path }}"
@@ -125,28 +120,25 @@
         wait_timeout: 30
       ignore_errors: true
 
-    # Phase 5: Remove Services (before deployment to avoid endpoint issues)
-    - name: Remove Services
+    # Phase 4: Remove Service
+    - name: Remove REST API Service
       kubernetes.core.k8s:
         api_version: v1
         kind: Service
-        name: "{{ item }}"
+        name: "{{ service_name }}"
         namespace: "{{ ai_namespace }}"
         state: absent
         kubeconfig: "{{ kubeconfig_path }}"
         wait: true
         wait_timeout: 60
-      loop:
-        - weather-mcp
-        - weather-mcp-external
       ignore_errors: true
 
-    # Phase 6: Remove Deployment
-    - name: Remove Weather MCP Deployment
+    # Phase 5: Remove Deployment
+    - name: Remove Weather REST API Deployment
       kubernetes.core.k8s:
         api_version: apps/v1
         kind: Deployment
-        name: weather-mcp
+        name: "{{ service_name }}"
         namespace: "{{ ai_namespace }}"
         state: absent
         kubeconfig: "{{ kubeconfig_path }}"
@@ -154,14 +146,14 @@
         wait_timeout: 120
       ignore_errors: true
 
-    # Phase 7: Verify cleanup completion
+    # Phase 6: Verify cleanup completion
     - name: Wait for pods to be terminated
       kubernetes.core.k8s_info:
         api_version: v1
         kind: Pod
         namespace: "{{ ai_namespace }}"
         label_selectors:
-          - "app=weather-mcp"
+          - "app={{ service_name }}"
         kubeconfig: "{{ kubeconfig_path }}"
       register: remaining_pods
       until: remaining_pods.resources | length == 0
@@ -169,8 +161,8 @@
       delay: 5
       ignore_errors: true
 
-    # Phase 8: Final verification and cleanup report
-    - name: Check for remaining weather resources
+    # Phase 7: Final verification and cleanup report
+    - name: Check for remaining REST API resources
       kubernetes.core.k8s_info:
         api_version: "{{ item.api_version }}"
         kind: "{{ item.kind }}"
@@ -188,16 +180,14 @@
           kind: TrafficPolicy
         - api_version: gateway.kgateway.dev/v1alpha1
           kind: Backend
-        - api_version: batch/v1
-          kind: Job
 
-    - name: Filter weather-related resources
+    - name: Filter REST API related resources
       set_fact:
-        weather_resources: >-
+        rest_api_resources: >-
           {%- set resources = [] -%}
           {%- for result in remaining_resources.results -%}
             {%- for resource in result.resources -%}
-              {%- if 'weather' in resource.metadata.name -%}
+              {%- if service_name in resource.metadata.name -%}
                 {%- set _ = resources.append({
                   'kind': result.item.kind,
                   'name': resource.metadata.name,
@@ -208,16 +198,16 @@
           {%- endfor -%}
           {{ resources | to_json }}
 
-    # Phase 9: Display cleanup summary
+    # Phase 8: Display cleanup summary
     - name: Display cleanup summary
       debug:
         msg: |
           
-          ============ Weather MCP Cleanup Complete ============
+          ============ Weather REST API Cleanup Complete ============
           
-          {% set parsed_resources = weather_resources | from_json if weather_resources is string else weather_resources %}
+          {% set parsed_resources = rest_api_resources | from_json if rest_api_resources is string else rest_api_resources %}
           {% if parsed_resources | length == 0 %}
-          ✅ CLEANUP SUCCESSFUL - All weather MCP resources removed
+          ✅ CLEANUP SUCCESSFUL - All REST API resources removed
           {% else %}
           ⚠️  CLEANUP INCOMPLETE - Remaining resources found
           {% for resource in parsed_resources %}
@@ -226,27 +216,32 @@
           {% endif %}
           
           Resources Processed:
-          ✅ Job: weather-service-test
-          ✅ TrafficPolicy: disable-weather-service-auth
-          ✅ HTTPRoutes: weather-service-route, weather-api-route, weather-openapi-spec-route
-          ✅ Backend: weather-static-backend
-          ✅ Services: weather-mcp, weather-mcp-external  
-          ✅ Deployment: weather-mcp
+          ✅ TrafficPolicy: {{ service_name }}-policy (with CORS)
+          ✅ HTTPRoute: {{ service_name }}-route
+          ✅ Backend: {{ service_name }}-backend (MCP with OpenAPI target)
+          ✅ Service: {{ service_name }} (appProtocol: http)
+          ✅ Deployment: {{ service_name }}
           
-          Namespace: {{ ai_namespace }}
-          Cleanup Mode: {{ 'Forced' if (force_cleanup | default(false) | bool) else 'Interactive' }}
+          Service Details:
+          📦 Service Name: {{ service_name }}
+          🎯 Service Type: REST API (OpenAPI integration)
+          🌐 Namespace: {{ ai_namespace }}
+          🚀 Backend Type: MCP with OpenAPI target
+          🔧 Cleanup Mode: {{ 'Forced' if (force_cleanup | default(false) | bool) else 'Interactive' }}
           
           {% if parsed_resources | length == 0 %}
-          🎉 Environment is clean and ready for fresh deployment!
+          🎉 REST API environment is clean and ready for fresh deployment!
           
           Next steps:
-          1. Run: ansible-playbook deploy-weather-mcp.yml
-          2. Or modify configuration and redeploy
+          1. Run: ansible-playbook deploy-weather-rest-api.yml
+          2. Or deploy Dynamic MCP: ansible-playbook deploy-weather-mcp-dynamic.yml
+          3. Or deploy Static MCP: ansible-playbook deploy-weather-mcp-only.yml
+          4. Or modify REST API configuration and redeploy
           {% else %}
           ⚠️  Manual cleanup may be required for remaining resources.
           
           Check manually:
-          kubectl get all,httproutes,trafficpolicies,backends -n {{ ai_namespace }} | grep weather
+          kubectl get all,httproutes,trafficpolicies,backends -n {{ ai_namespace }} | grep {{ service_name }}
           {% endif %}
           
           =======================================================================

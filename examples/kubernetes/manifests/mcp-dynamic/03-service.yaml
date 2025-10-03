@@ -1,0 +1,25 @@
+# Weather MCP Service (Dynamic MCP)
+# Service for MCP protocol with proper annotations
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-mcp-dynamic
+  namespace: ai-services
+  labels:
+    app: weather-mcp-dynamic
+    component: mcp-server
+  annotations:
+    # MCP service annotations for K-Gateway recognition
+    gateway.kgateway.dev/transport: "StreamableHTTP"
+    gateway.kgateway.dev/protocol: "mcp"
+spec:
+  type: ClusterIP
+  selector:
+    app: weather-mcp-dynamic
+  ports:
+    - port: 80
+      targetPort: 8000
+      name: mcp-http
+      # MCP protocol for K-Gateway
+      appProtocol: StreamableHTTP

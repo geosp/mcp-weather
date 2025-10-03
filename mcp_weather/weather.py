@@ -1,3 +1,50 @@
+"""
+Weather MCP Server - FastMCP 2.0 Implementation
+
+This module implements a comprehensive weather service using the Model Context Protocol (MCP)
+with support for both pure MCP protocol and REST API modes.
+
+Architecture:
+    - FastMCP 2.0 framework for MCP protocol implementation
+    - FastAPI integration for REST endpoints and OpenAPI documentation
+    - Open-Meteo API for weather data (free, no API key required)
+    - Location caching system with expiry for performance
+    - Configurable transport modes (stdio, HTTP)
+
+Deployment Modes:
+    1. MCP_ONLY=true  - Pure MCP protocol for AI tools (VS Code, GitHub Copilot)
+    2. MCP_ONLY=false - REST API + MCP protocol for web applications
+    
+Environment Variables:
+    MCP_TRANSPORT: "stdio" or "http" (default: "stdio")
+    MCP_HOST: Bind address for HTTP mode (default: "0.0.0.0")  
+    MCP_PORT: Port for HTTP mode (default: "3000")
+    MCP_ONLY: "true" for pure MCP, "false" for REST+MCP (default: "false")
+
+Usage Examples:
+    # Pure MCP protocol (for MCP tools)
+    MCP_ONLY=true python -m mcp_weather.weather --transport http --port 8000
+    
+    # REST API + MCP (for web applications)
+    MCP_ONLY=false python -m mcp_weather.weather --transport http --port 8000
+    
+    # stdio mode (for local MCP clients)
+    python -m mcp_weather.weather
+
+API Endpoints (REST mode):
+    GET /weather?location={city} - Get weather data for a location
+    GET /health                  - Health check endpoint
+    GET /docs                   - Interactive API documentation
+    GET /openapi.json           - OpenAPI specification
+    
+MCP Tools (MCP mode):
+    get_hourly_weather(location) - Get weather forecast for a location
+
+Author: MCP Weather Team
+License: Educational use
+Version: 2.0.0 (FastMCP 2.0)
+"""
+
 import os
 import json
 import logging
@@ -32,7 +79,33 @@ CACHE_EXPIRY_DAYS = 30
 
 
 class LocationCache:
-    """Handles caching of location coordinates with expiry"""
+    """
+    Handles caching of location coordinates with expiry
+    
+    This cache system improves performance by storing geocoded location data
+    locally, reducing the number of API calls to the geocoding service.
+    
+    Features:
+        - Persistent JSON-based storage in user's cache directory
+        - 30-day expiry to balance performance and data freshness
+        - Case-insensitive location lookup
+        - Atomic file operations for data safety
+        - Graceful error handling for corrupted cache files
+    
+    Cache Structure:
+        {
+            "location_name": {
+                "latitude": float,
+                "longitude": float, 
+                "name": str,
+                "country": str,
+                "cached_at": "ISO timestamp"
+            }
+        }
+    
+    Storage Location:
+        ~/.cache/weather/location_cache.json
+    """
     
     @staticmethod
     def get(location: str) -> Optional[Dict[str, float]]:
@@ -101,7 +174,33 @@ class LocationCache:
 
 
 class WeatherService:
-    """Handles all weather API interactions using Open-Meteo"""
+    """
+    Handles all weather API interactions using Open-Meteo API
+    
+    This service provides a complete weather data pipeline:
+    1. Location validation and sanitization
+    2. Geocoding (location name -> coordinates) with caching
+    3. Weather data fetching from Open-Meteo API
+    4. Data formatting and standardization
+    5. Weather code translation to human-readable descriptions
+    
+    Features:
+        - Free Open-Meteo API (no API key required)
+        - Location coordinate caching with expiry (30 days)
+        - Comprehensive error handling and validation
+        - WMO weather code translation
+        - Wind direction formatting
+        - Structured JSON response format
+    
+    APIs Used:
+        - Open-Meteo Geocoding API: https://geocoding-api.open-meteo.com/v1/search
+        - Open-Meteo Weather API: https://api.open-meteo.com/v1/forecast
+    
+    Caching:
+        - Location coordinates cached locally to reduce API calls
+        - Cache expires after 30 days to ensure data freshness
+        - Atomic file operations for cache safety
+    """
     
     def __init__(self):
         self.geocoding_url = "https://geocoding-api.open-meteo.com/v1/search"
@@ -339,23 +438,66 @@ async def get_hourly_weather(location: str) -> Dict[str, Any]:
     """
     Get hourly weather forecast for a location using Open-Meteo API
     
+    This is the main MCP tool that provides weather data to AI assistants.
+    It handles location geocoding, weather data fetching, and response formatting.
+    
+    Features:
+        - Location caching to reduce API calls
+        - Comprehensive weather data (temperature, humidity, wind, precipitation)
+        - 12-hour hourly forecast
+        - WMO weather code translation to human-readable descriptions
+        - Error handling for invalid locations
+    
     Args:
-        location: City name (e.g., "Tallahassee", "New York", "London")
+        location (str): City name (e.g., "Tallahassee", "New York", "London", "Tokyo")
     
     Returns:
-        Weather data including current conditions and 12-hour forecast with:
-        - Temperature (Celsius)
-        - Humidity
-        - Precipitation and probability
-        - Wind speed and direction
-        - Weather conditions description
+        Dict[str, Any]: Structured weather data containing:
+            - location: Location name and coordinates
+            - country: Country name  
+            - timezone: Local timezone
+            - current_conditions: Current weather snapshot
+            - hourly_forecast: Next 12 hours of weather data
+            - data_source: Attribution to Open-Meteo API
+    
+    Raises:
+        ValueError: If location is empty or invalid
+        HTTPException: If location not found or API error occurs
+    
+    Example:
+        >>> weather = await get_hourly_weather("Paris")
+        >>> logger.info(f"Current temperature: {weather['current_conditions']['temperature']['value']}°C")
     """
     return await weather_service.get_weather(location)
 
 
 # FastAPI Application
 def create_app() -> FastAPI:
-    """Create and configure FastAPI application"""
+    """
+    Create and configure FastAPI application with MCP integration
+    
+    This function handles the complex logic of supporting both pure MCP protocol
+    and REST API modes based on environment variables.
+    
+    Mode Selection Logic:
+        1. MCP_ONLY=true + HTTP transport  -> Return pure MCP app (no FastAPI wrapper)
+        2. MCP_ONLY=false + HTTP transport -> Return FastAPI app with MCP mounted at /mcp
+        3. stdio transport                 -> MCP app only (no HTTP server)
+    
+    Environment Variables:
+        MCP_ONLY: "true" for pure MCP protocol, "false" for REST+MCP (default: "false")
+        MCP_TRANSPORT: "stdio" or "http" (default: "stdio")
+    
+    Returns:
+        FastAPI: Configured application instance
+            - Pure MCP app for MCP_ONLY=true (enables proper protocol handling)
+            - FastAPI wrapper with mounted MCP for MCP_ONLY=false (enables REST endpoints)
+    
+    Architecture Notes:
+        - Pure MCP mode avoids FastAPI mounting issues that can break MCP protocol
+        - REST mode provides both REST endpoints and MCP protocol access
+        - Health endpoint available in both modes for Kubernetes health checks
+    """
     
     # Create MCP ASGI app - for mounting, don't specify path here
     mcp_app = mcp.http_app()
@@ -433,7 +575,38 @@ app = create_app()
 
 
 def main():
-    """Main entry point"""
+    """
+    Main entry point for the Weather MCP Server
+    
+    Handles both stdio and HTTP transport modes based on environment configuration.
+    Provides detailed startup logging and route information for debugging.
+    
+    Transport Modes:
+        - stdio: Direct MCP protocol for local client integration
+        - http: Web server mode supporting both MCP and REST endpoints
+    
+    Environment Configuration:
+        MCP_TRANSPORT: "stdio" or "http" (default: "stdio")
+        MCP_HOST: Bind address for HTTP mode (default: "0.0.0.0")
+        MCP_PORT: Port for HTTP mode (default: "3000") 
+        MCP_ONLY: Protocol mode for HTTP transport (default: "false")
+    
+    Startup Information:
+        - Logs server configuration and endpoints
+        - Displays registered routes for debugging
+        - Shows API documentation URLs for REST mode
+        - Confirms Open-Meteo API integration (no API key required)
+    
+    Examples:
+        # Pure MCP protocol (for AI tools)
+        MCP_TRANSPORT=http MCP_ONLY=true python -m mcp_weather.weather
+        
+        # REST API + MCP (for web apps)  
+        MCP_TRANSPORT=http MCP_ONLY=false python -m mcp_weather.weather
+        
+        # stdio mode (for local MCP clients)
+        python -m mcp_weather.weather
+    """
     transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
     
     if transport == "http":
@@ -445,19 +618,16 @@ def main():
         logger.info(f"Listening on http://{host}:{port}")
         logger.info(f"API docs available at http://{host}:{port}/docs")
         
-        # Print registered routes
-        print("\n" + "="*50)
-        print("📋 Registered Routes:")
-        print("="*50)
+        # Log registered routes for debugging
+        logger.info("Registered Routes:")
         for route in app.routes:
             if hasattr(route, 'methods') and hasattr(route, 'path'):
                 # Handle different method types
                 methods = route.methods if isinstance(route.methods, (list, set, tuple)) else [str(route.methods)]
                 methods_str = ', '.join(methods) if methods else 'UNKNOWN'
-                print(f"  {methods_str:8} {route.path}")
+                logger.info(f"  {methods_str:8} {route.path}")
             elif hasattr(route, 'path'):
-                print(f"  MOUNT    {route.path} -> MCP App")
-        print("="*50 + "\n")
+                logger.info(f"  MOUNT    {route.path} -> MCP App")
         
         uvicorn.run(app, host=host, port=port, log_level="info")
     else:

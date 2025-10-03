@@ -1,0 +1,91 @@
+# K-Gateway Integration Resources for REST API
+# Static Backend + HTTPRoute + TrafficPolicy for HTTP API access
+#
+# IMPORTANT: Update the parentRefs.name and namespace to match your gateway
+# IMPORTANT: Update the hostname to match your domain
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: Backend
+metadata:
+  name: weather-rest-api-backend
+  namespace: ai-services
+  labels:
+    app: weather-rest-api
+    component: rest-backend
+spec:
+  # Use Static backend for REST API (not MCP)
+  type: Static
+  static:
+    hosts:
+      - host: weather-rest-api.ai-services.svc.cluster.local
+        port: 80
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: weather-rest-api-route
+  namespace: ai-services
+  labels:
+    app: weather-rest-api
+    component: rest-route
+spec:
+  parentRefs:
+  # CUSTOMIZE: Update to match your gateway name and namespace
+  - name: agentgateway
+    namespace: kgateway-system
+  hostnames:
+  # CUSTOMIZE: Update to match your domain
+  - agentgateway.mixwarecs-home.net
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: "/weather-api/"
+      backendRefs:
+        - group: gateway.kgateway.dev
+          kind: Backend
+          name: weather-rest-api-backend
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: weather-rest-api-policy
+  namespace: ai-services
+  labels:
+    app: weather-rest-api
+    component: rest-policy
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: weather-rest-api-route
+  # Disable authentication for REST API
+  authConfig:
+    disabled: true
+  # Enable CORS for UI access (use proper URL format)
+  cors:
+    allowOrigins:
+      - "http://localhost:3000"
+      - "http://localhost:8080"
+      - "https://agentgateway.mixwarecs-home.net"
+      - "http://agentgateway.mixwarecs-home.net"
+    allowHeaders:
+      - "Content-Type"
+      - "Authorization"
+      - "Accept"
+      - "Origin"
+      - "User-Agent"
+    allowMethods:
+      - "GET"
+      - "POST" 
+      - "PUT"
+      - "DELETE"
+      - "OPTIONS"

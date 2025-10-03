@@ -1,0 +1,72 @@
+# K-Gateway Integration Resources for Dynamic MCP
+# Dynamic Backend + HTTPRoute + TrafficPolicy for MCP tool integration
+#
+# IMPORTANT: Update the parentRefs.name and namespace to match your gateway
+# IMPORTANT: Update the hostname to match your domain
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: Backend
+metadata:
+  name: weather-mcp-dynamic-backend
+  namespace: ai-services
+  labels:
+    app: weather-mcp-dynamic
+    component: mcp-backend
+spec:
+  # Dynamic Backend with label selectors for MCP recognition
+  type: MCP
+  selector:
+    matchLabels:
+      app: weather-mcp-dynamic
+      component: mcp-server
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: weather-mcp-dynamic-route
+  namespace: ai-services
+  labels:
+    app: weather-mcp-dynamic
+    component: mcp-route
+spec:
+  parentRefs:
+  # CUSTOMIZE: Update to match your gateway name and namespace
+  - name: agentgateway
+    namespace: kgateway-system
+  hostnames:
+  # CUSTOMIZE: Update to match your domain
+  - agentgateway.mixwarecs-home.net
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: "/weather-dynamic/"
+      backendRefs:
+        - group: gateway.kgateway.dev
+          kind: Backend
+          name: weather-mcp-dynamic-backend
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: weather-mcp-dynamic-policy
+  namespace: ai-services
+  labels:
+    app: weather-mcp-dynamic
+    component: mcp-policy
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: weather-mcp-dynamic-route
+  # Disable authentication for MCP tool access
+  authConfig:
+    disabled: true

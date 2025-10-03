@@ -1,0 +1,428 @@
+---
+# Weather REST API Server Kubernetes Deployment
+# 
+# This playbook deploys a weather REST API service using proper OpenAPI integration:
+# - MCP Backend with OpenAPI target (following agentgateway best practices)
+# - Automatic API discovery and tool generation
+# - Proper CORS configuration for UI access
+# - OpenAPI schema serving with correct server URLs
+# - REST-only mode (MCP_ONLY=false)
+#
+# Based on: https://agentgateway.dev/docs/mcp/connect/openapi/
+#
+# Prerequisites:
+# - Kubernetes cluster with K-Gateway installed
+# - kubectl configured with appropriate permissions
+# - agentgateway Gateway already configured
+#
+# Usage:
+#   ansible-playbook deploy-weather-rest-api.yml
+#   ansible-playbook deploy-weather-rest-api.yml -e test_endpoint=gateway
+#
+# Test Endpoint Options:
+#   internal - Test via cluster internal service (default)
+#   gateway  - Test via K-Gateway route
+#
+- name: Deploy Weather REST API Server with OpenAPI Integration
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../../group_vars/all.yml
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/../../../kubeconfig"
+    kubectl_cmd: "kubectl --kubeconfig={{ kubeconfig_path }}"
+    ai_namespace: "ai-services"
+    kgateway_namespace: "kgateway-system"
+
+    # REST API service configuration
+    weather_image: "ghcr.io/geosp/mcp-weather:master"
+    service_name: "weather-rest-api"
+    service_port: 8000
+    
+    # REST-only mode (not MCP protocol)
+    rest_only_mode: true
+    
+    # Test configuration (default to internal if not provided)
+    test_endpoint_var: "{{ test_endpoint | default('internal') }}"  # Options: internal, gateway
+
+  tasks:
+    # Phase 0: Prerequisites
+    - name: Check if kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_file
+
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig file not found at {{ kubeconfig_path }}"
+      when: not kubeconfig_file.stat.exists
+
+    # Phase 1: REST API Deployment
+    - name: Deploy Weather REST API server
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "{{ service_name }}"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: rest-api
+              service-type: weather-api
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: "{{ service_name }}"
+            template:
+              metadata:
+                labels:
+                  app: "{{ service_name }}"
+                  component: rest-api
+                annotations:
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "{{ service_port | string }}"
+                  prometheus.io/path: "/metrics"
+              spec:
+                containers:
+                  - name: "{{ service_name }}"
+                    image: "{{ weather_image }}"
+                    command: ["uvx"]
+                    args:
+                      - "--from"
+                      - "git+https://github.com/geosp/mcp-weather"
+                      - "mcp-weather"
+                      - "--transport"
+                      - "http"
+                      - "--host"
+                      - "0.0.0.0"
+                      - "--port"
+                      - "{{ service_port | string }}"
+                    env:
+                      # REST API mode (not MCP-only)
+                      - name: MCP_ONLY
+                        value: "false"
+                      - name: MCP_TRANSPORT
+                        value: "http"
+                      - name: MCP_PORT
+                        value: "{{ service_port | string }}"
+                      - name: MCP_HOST
+                        value: "0.0.0.0"
+                    ports:
+                      - containerPort: "{{ service_port }}"
+                        name: http-api
+                        protocol: TCP
+                    livenessProbe:
+                      httpGet:
+                        port: "{{ service_port }}"
+                        path: /health
+                      initialDelaySeconds: 10
+                      periodSeconds: 30
+                      timeoutSeconds: 5
+                      failureThreshold: 3
+                    readinessProbe:
+                      httpGet:
+                        port: "{{ service_port }}"
+                        path: /health
+                      initialDelaySeconds: 5
+                      periodSeconds: 10
+                      timeoutSeconds: 3
+                      failureThreshold: 2
+                    resources:
+                      requests:
+                        memory: "128Mi"
+                        cpu: "100m"
+                      limits:
+                        memory: "512Mi"
+                        cpu: "500m"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_condition:
+          type: Progressing
+          status: "True"
+          reason: NewReplicaSetAvailable
+        wait_timeout: 300
+
+    # Phase 2: REST API Service
+    - name: Apply Weather REST API service
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ service_name }}"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: rest-api
+          spec:
+            type: ClusterIP
+            selector:
+              app: "{{ service_name }}"
+            ports:
+              - port: 80
+                targetPort: "{{ service_port }}"
+                name: http-api
+                # Standard HTTP protocol (not MCP)
+                appProtocol: http
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 3: Backend for REST API (Static backend for HTTP API)
+    - name: Create Static Backend for Weather REST API
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.kgateway.dev/v1alpha1
+          kind: Backend
+          metadata:
+            name: "{{ service_name }}-backend"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: rest-backend
+          spec:
+            # Use Static backend for REST API (not MCP)
+            type: Static
+            static:
+              hosts:
+                - host: "{{ service_name }}.{{ ai_namespace }}.svc.cluster.local"
+                  port: 80
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 4: HTTPRoute for REST API Access
+    - name: Create HTTPRoute for Weather REST API
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: "{{ service_name }}-route"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: rest-route
+          spec:
+            parentRefs:
+              - name: agentgateway
+                namespace: "{{ kgateway_namespace }}"
+            hostnames:
+              - agentgateway.mixwarecs-home.net
+            rules:
+              - matches:
+                  - path:
+                      type: PathPrefix
+                      value: "/weather-api/"
+                backendRefs:
+                  - group: gateway.kgateway.dev
+                    kind: Backend
+                    name: "{{ service_name }}-backend"
+                filters:
+                  - type: URLRewrite
+                    urlRewrite:
+                      path:
+                        type: ReplacePrefixMatch
+                        replacePrefixMatch: /
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 5: TrafficPolicy with CORS for REST API access
+    - name: Create TrafficPolicy with CORS for Weather REST API
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: gateway.kgateway.dev/v1alpha1
+          kind: TrafficPolicy
+          metadata:
+            name: "{{ service_name }}-policy"
+            namespace: "{{ ai_namespace }}"
+            labels:
+              app: "{{ service_name }}"
+              component: rest-policy
+          spec:
+            targetRefs:
+              - group: gateway.networking.k8s.io
+                kind: HTTPRoute
+                name: "{{ service_name }}-route"
+            # Disable authentication for REST API
+            authConfig:
+              disabled: true
+            # Enable CORS for UI access (use proper URL format)
+            cors:
+              allowOrigins:
+                - "http://localhost:3000"
+                - "http://localhost:8080"
+                - "https://agentgateway.mixwarecs-home.net"
+                - "http://agentgateway.mixwarecs-home.net"
+              allowHeaders:
+                - "Content-Type"
+                - "Authorization"
+                - "Accept"
+                - "Origin"
+                - "User-Agent"
+              allowMethods:
+                - "GET"
+                - "POST" 
+                - "PUT"
+                - "DELETE"
+                - "OPTIONS"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait: true
+        wait_timeout: 60
+
+    # Phase 6: Deployment Verification
+    - name: Wait for deployment to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ service_name }}"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+
+    - name: Get deployment status
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ service_name }}"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: deployment_status
+
+    - name: Display deployment status
+      debug:
+        msg: |
+          Weather REST API Deployment Status:
+          - Name: {{ deployment_status.resources[0].metadata.name }}
+          - Namespace: {{ deployment_status.resources[0].metadata.namespace }}
+          - Replicas: {{ deployment_status.resources[0].status.replicas | default(0) }}/{{ deployment_status.resources[0].spec.replicas }}
+          - Ready Replicas: {{ deployment_status.resources[0].status.readyReplicas | default(0) }}
+          - Available Replicas: {{ deployment_status.resources[0].status.availableReplicas | default(0) }}
+
+    # Phase 7: Service and Backend Status
+    - name: Get service status
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: "{{ service_name }}"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: service_status
+
+    - name: Get backend status
+      kubernetes.core.k8s_info:
+        api_version: gateway.kgateway.dev/v1alpha1
+        kind: Backend
+        name: "{{ service_name }}-backend"
+        namespace: "{{ ai_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: backend_status
+
+    - name: Display service configuration
+      debug:
+        msg: |
+          Weather REST API Service Configuration:
+          - Service Name: {{ service_status.resources[0].metadata.name }}
+          - Cluster IP: {{ service_status.resources[0].spec.clusterIP }}
+          - Port: {{ service_status.resources[0].spec.ports[0].port }}
+          - Target Port: {{ service_status.resources[0].spec.ports[0].targetPort }}
+          - App Protocol: {{ service_status.resources[0].spec.ports[0].appProtocol | default('not set') }}
+
+    - name: Display backend configuration
+      debug:
+        msg: |
+          Weather REST API Backend Configuration:
+          - Backend Name: {{ backend_status.resources[0].metadata.name }}
+          - Backend Type: {{ backend_status.resources[0].spec.type }}
+          - Static Host: {{ backend_status.resources[0].spec.static.hosts[0].host }}
+          - Static Port: {{ backend_status.resources[0].spec.static.hosts[0].port }}
+
+    # Phase 8: Test REST API Connection
+    - name: Test REST API connection based on test_endpoint setting
+      block:
+        # Internal cluster test (default)
+        - name: Test REST API via internal service
+          uri:
+            url: "http://{{ service_status.resources[0].spec.clusterIP }}/health"
+            method: GET
+            timeout: 10
+          register: internal_rest_test
+          when: test_endpoint_var == "internal"
+          ignore_errors: true
+
+        - name: Display internal REST test results
+          debug:
+            msg: |
+              Internal REST API Test Results:
+              - Status Code: {{ internal_rest_test.status | default('failed') }}
+              - Response: {{ internal_rest_test.json | default(internal_rest_test.msg | default('No response')) }}
+              - URL: http://{{ service_status.resources[0].spec.clusterIP }}/health
+          when: test_endpoint_var == "internal"
+
+        # Gateway test
+        - name: Test REST API via K-Gateway route
+          uri:
+            url: "http://agentgateway.mixwarecs-home.net/weather-api/health"
+            method: GET
+            timeout: 10
+          register: gateway_rest_test
+          when: test_endpoint_var == "gateway"
+          ignore_errors: true
+
+        - name: Display gateway REST test results
+          debug:
+            msg: |
+              Gateway REST API Test Results:
+              - Status Code: {{ gateway_rest_test.status | default('failed') }}
+              - Response: {{ gateway_rest_test.json | default(gateway_rest_test.msg | default('No response')) }}
+              - URL: http://agentgateway.mixwarecs-home.net/weather-api/health
+          when: test_endpoint_var == "gateway"
+
+    # Phase 9: Summary and Next Steps
+    - name: Display deployment summary
+      debug:
+        msg: |
+          =====================================================
+          Weather REST API Server Deployment Complete!
+          =====================================================
+          
+          REST API Configuration:
+          - Deployment: {{ service_name }} ({{ deployment_status.resources[0].status.readyReplicas | default(0) }}/{{ deployment_status.resources[0].spec.replicas }} ready)
+          - Service: {{ service_name }} (ClusterIP: {{ service_status.resources[0].spec.clusterIP }})
+          - Backend: {{ service_name }}-backend (Type: {{ backend_status.resources[0].spec.type }}, Static target)
+          - Route: /weather-api/
+          
+          Key REST API Features:
+          - Static Backend for HTTP API routing
+          - CORS enabled for UI access
+          - REST-only mode (MCP_ONLY=false)
+          - Standard HTTP protocol
+          
+          Access URLs:
+          - Health Check: http://agentgateway.mixwarecs-home.net/weather-api/health
+          - Weather API: http://agentgateway.mixwarecs-home.net/weather-api/weather?location=Rome
+          - OpenAPI Spec: http://agentgateway.mixwarecs-home.net/weather-api/openapi.json
+          - API Docs: http://agentgateway.mixwarecs-home.net/weather-api/docs
+          
+          Next Steps:
+          1. Test REST API endpoints via curl or browser
+          2. Check API documentation at /weather-api/docs
+          3. Verify OpenAPI specification at /weather-api/openapi.json
+          4. Use REST API in applications or tools
+          
+          Access URLs:
+          - Health Check: http://agentgateway.mixwarecs-home.net/weather-api/health
+          - Weather API: http://agentgateway.mixwarecs-home.net/weather-api/weather?location=Rome
+          - OpenAPI Spec: http://agentgateway.mixwarecs-home.net/weather-api/openapi.json
+          - API Docs: http://agentgateway.mixwarecs-home.net/weather-api/docs
+          
+          Testing Commands:
+          curl http://agentgateway.mixwarecs-home.net/weather-api/health
+          curl "http://agentgateway.mixwarecs-home.net/weather-api/weather?location=Rome"
+          curl http://agentgateway.mixwarecs-home.net/weather-api/openapi.json

@@ -1,0 +1,78 @@
+# Weather MCP Server Deployment (Dynamic MCP)
+# MCP-only mode with HTTP transport optimized for MCP tool integration
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-mcp-dynamic
+  namespace: ai-services
+  labels:
+    app: weather-mcp-dynamic
+    component: mcp-server
+    service-type: weather-mcp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: weather-mcp-dynamic
+  template:
+    metadata:
+      labels:
+        app: weather-mcp-dynamic
+        component: mcp-server
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: weather-mcp-dynamic
+          image: ghcr.io/geosp/mcp-weather:master
+          command: ["uvx"]
+          args:
+            - "--from"
+            - "git+https://github.com/geosp/mcp-weather"
+            - "mcp-weather"
+            - "--transport"
+            - "http"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8000"
+          env:
+            # MCP-only mode for pure protocol
+            - name: MCP_ONLY
+              value: "true"
+            - name: MCP_TRANSPORT
+              value: "http"
+            - name: MCP_PORT
+              value: "8000"
+            - name: MCP_HOST
+              value: "0.0.0.0"
+          ports:
+            - containerPort: 8000
+              name: mcp-http
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              port: 8000
+              path: /health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              port: 8000
+              path: /health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

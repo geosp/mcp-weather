@@ -1,30 +1,32 @@
-# Weather MCP Server Deployment
-# HTTP transport with high availability and health monitoring
+# Weather REST API Deployment
+# REST-only mode with FastAPI integration for HTTP client access
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: weather-mcp
+  name: weather-rest-api
   namespace: ai-services
   labels:
-    app: weather-mcp
-    mcp-type: weather
+    app: weather-rest-api
+    component: rest-api
+    service-type: weather-api
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: weather-mcp
+      app: weather-rest-api
   template:
     metadata:
       labels:
-        app: weather-mcp
+        app: weather-rest-api
+        component: rest-api
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
     spec:
       containers:
-        - name: weather-mcp
+        - name: weather-rest-api
           image: ghcr.io/geosp/mcp-weather:master
           command: ["uvx"]
           args:
@@ -38,6 +40,9 @@ spec:
             - "--port"
             - "8000"
           env:
+            # REST API mode (not MCP-only)
+            - name: MCP_ONLY
+              value: "false"
             - name: MCP_TRANSPORT
               value: "http"
             - name: MCP_PORT
@@ -46,27 +51,28 @@ spec:
               value: "0.0.0.0"
           ports:
             - containerPort: 8000
-              name: http
-          resources:
-            requests:
-              cpu: 250m
-              memory: 512Mi
-            limits:
-              cpu: 500m
-              memory: 1Gi
+              name: http-api
+              protocol: TCP
           livenessProbe:
             httpGet:
-              path: /health
               port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 10
+              path: /health
+            initialDelaySeconds: 10
+            periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
               port: 8000
+              path: /health
             initialDelaySeconds: 5
-            periodSeconds: 5
+            periodSeconds: 10
             timeoutSeconds: 3
-            failureThreshold: 3
+            failureThreshold: 2
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

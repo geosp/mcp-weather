@@ -1,23 +1,30 @@
 ---
-# Weather MCP-Only Server Cleanup Playbook
+# Weather Dynamic MCP Server Cleanup Playbook
 # 
-# This playbook removes the exact weather MCP-only resources deployed by deploy-weather-mcp-only.yml
+# This playbook removes weather Dynamic MCP resources deployed by deploy-weather-mcp-dynamic.yml
+# Specifically handles:
+# - Dynamic MCP Backend with label selectors
+# - Services with appProtocol: kgateway.dev/mcp
+# - StreamableHTTP transport configuration
+# - Selector-based service discovery
+# 
 # Useful for:
-# - Development iterations of pure MCP protocol
-# - Testing different MCP configurations
-# - Troubleshooting MCP protocol issues
-# - Complete MCP-only environment reset
+# - Development iterations with Dynamic MCP
+# - Testing different Dynamic MCP configurations
+# - Troubleshooting Dynamic MCP deployment issues
+# - Switching from Dynamic back to Static MCP
+# - Complete Dynamic MCP environment reset
 #
 # Prerequisites:
 # - Kubernetes cluster access
 # - kubectl configured with appropriate permissions
-# - Same kubeconfig used for original deployment
+# - Same kubeconfig used for Dynamic MCP deployment
 #
 # Usage:
-#   ansible-playbook cleanup-weather-mcp-only.yml
-#   ansible-playbook cleanup-weather-mcp-only.yml --extra-vars "force_cleanup=true"
+#   ansible-playbook cleanup-weather-mcp-dynamic.yml
+#   ansible-playbook cleanup-weather-mcp-dynamic.yml --extra-vars "force_cleanup=true"
 #
-- name: Cleanup Weather MCP-Only Server Resources
+- name: Cleanup Weather Dynamic MCP Server Resources
   hosts: localhost
   gather_facts: false
   vars_files:
@@ -26,9 +33,10 @@
     kubeconfig_path: "{{ playbook_dir }}/../../../kubeconfig"
     kubectl_cmd: "kubectl --kubeconfig={{ kubeconfig_path }}"
     ai_namespace: "ai-services"
+    kgateway_namespace: "kgateway-system"
     
-    # MCP-only service configuration (must match deployment)
-    service_name: "weather-mcp-only"
+    # Dynamic MCP service configuration (must match deployment)
+    service_name: "weather-mcp-dynamic"
     
     # Cleanup confirmation (can be overridden with --extra-vars "force_cleanup=true")
     force_cleanup: false
@@ -49,18 +57,18 @@
       pause:
         prompt: |
           
-          ⚠️  WARNING: This will remove the following Weather MCP-Only resources ⚠️
+          ⚠️  WARNING: This will remove the following Weather Dynamic MCP resources ⚠️
           
-          Resources to be deleted (pure MCP protocol deployment):
-          - Job: {{ service_name }}-protocol-test
-          - TrafficPolicy: disable-{{ service_name }}-auth
+          Resources to be deleted (Dynamic MCP with label selectors):
+          - TrafficPolicy: {{ service_name }}-no-auth
           - HTTPRoute: {{ service_name }}-route
-          - Backend: {{ service_name }}-backend
-          - Services: {{ service_name }}, {{ service_name }}-external
+          - Backend: {{ service_name }}-backend (Dynamic MCP with selectors)
+          - Service: {{ service_name }} (with appProtocol: kgateway.dev/mcp)
           - Deployment: {{ service_name }}
           
           Namespace: {{ ai_namespace }}
-          Service Type: Pure MCP Protocol (MCP_ONLY=true)
+          Service Type: Dynamic MCP (label selector-based)
+          Transport: StreamableHTTP
           
           Continue with cleanup? (yes/no)
       register: cleanup_confirmation
@@ -73,25 +81,12 @@
         - not (force_cleanup | default(false) | bool)
         - cleanup_confirmation.user_input | lower not in ['yes', 'y']
 
-    # Phase 1: Stop running test job first (if any)
-    - name: Remove MCP protocol test job
-      kubernetes.core.k8s:
-        api_version: batch/v1
-        kind: Job
-        name: "{{ service_name }}-protocol-test"
-        namespace: "{{ ai_namespace }}"
-        state: absent
-        kubeconfig: "{{ kubeconfig_path }}"
-        wait: true
-        wait_timeout: 60
-      ignore_errors: true
-
-    # Phase 2: Remove TrafficPolicy (must be removed before HTTPRoutes)
-    - name: Remove MCP-Only TrafficPolicy
+    # Phase 1: Remove TrafficPolicy (must be removed before HTTPRoute)
+    - name: Remove Dynamic MCP TrafficPolicy
       kubernetes.core.k8s:
         api_version: gateway.kgateway.dev/v1alpha1
         kind: TrafficPolicy
-        name: "disable-{{ service_name }}-auth"
+        name: "{{ service_name }}-no-auth"
         namespace: "{{ ai_namespace }}"
         state: absent
         kubeconfig: "{{ kubeconfig_path }}"
@@ -99,8 +94,8 @@
         wait_timeout: 30
       ignore_errors: true
 
-    # Phase 3: Remove HTTPRoute
-    - name: Remove MCP-Only HTTPRoute
+    # Phase 2: Remove HTTPRoute
+    - name: Remove Dynamic MCP HTTPRoute
       kubernetes.core.k8s:
         api_version: gateway.networking.k8s.io/v1
         kind: HTTPRoute
@@ -112,8 +107,8 @@
         wait_timeout: 30
       ignore_errors: true
 
-    # Phase 4: Remove Backend
-    - name: Remove MCP-Only Static Backend
+    # Phase 3: Remove Dynamic MCP Backend (with label selectors)
+    - name: Remove Dynamic MCP Backend
       kubernetes.core.k8s:
         api_version: gateway.kgateway.dev/v1alpha1
         kind: Backend
@@ -125,24 +120,21 @@
         wait_timeout: 30
       ignore_errors: true
 
-    # Phase 5: Remove Services (before deployment to avoid endpoint issues)
-    - name: Remove MCP-Only Services
+    # Phase 4: Remove Service (with MCP protocol annotations)
+    - name: Remove Dynamic MCP Service
       kubernetes.core.k8s:
         api_version: v1
         kind: Service
-        name: "{{ item }}"
+        name: "{{ service_name }}"
         namespace: "{{ ai_namespace }}"
         state: absent
         kubeconfig: "{{ kubeconfig_path }}"
         wait: true
         wait_timeout: 60
-      loop:
-        - "{{ service_name }}"
-        - "{{ service_name }}-external"
       ignore_errors: true
 
-    # Phase 6: Remove Deployment
-    - name: Remove Weather MCP-Only Deployment
+    # Phase 5: Remove Deployment
+    - name: Remove Weather Dynamic MCP Deployment
       kubernetes.core.k8s:
         api_version: apps/v1
         kind: Deployment
@@ -154,7 +146,7 @@
         wait_timeout: 120
       ignore_errors: true
 
-    # Phase 7: Verify cleanup completion
+    # Phase 6: Verify cleanup completion
     - name: Wait for pods to be terminated
       kubernetes.core.k8s_info:
         api_version: v1
@@ -169,8 +161,8 @@
       delay: 5
       ignore_errors: true
 
-    # Phase 8: Final verification and cleanup report
-    - name: Check for remaining MCP-only resources
+    # Phase 7: Final verification and cleanup report
+    - name: Check for remaining Dynamic MCP resources
       kubernetes.core.k8s_info:
         api_version: "{{ item.api_version }}"
         kind: "{{ item.kind }}"
@@ -188,12 +180,10 @@
           kind: TrafficPolicy
         - api_version: gateway.kgateway.dev/v1alpha1
           kind: Backend
-        - api_version: batch/v1
-          kind: Job
 
-    - name: Filter MCP-only related resources
+    - name: Filter Dynamic MCP related resources
       set_fact:
-        mcp_only_resources: >-
+        dynamic_mcp_resources: >-
           {%- set resources = [] -%}
           {%- for result in remaining_resources.results -%}
             {%- for resource in result.resources -%}
@@ -208,16 +198,16 @@
           {%- endfor -%}
           {{ resources | to_json }}
 
-    # Phase 9: Display cleanup summary
+    # Phase 8: Display cleanup summary
     - name: Display cleanup summary
       debug:
         msg: |
           
-          ============ Weather MCP-Only Cleanup Complete ============
+          ============ Weather Dynamic MCP Cleanup Complete ============
           
-          {% set parsed_resources = mcp_only_resources | from_json if mcp_only_resources is string else mcp_only_resources %}
+          {% set parsed_resources = dynamic_mcp_resources | from_json if dynamic_mcp_resources is string else dynamic_mcp_resources %}
           {% if parsed_resources | length == 0 %}
-          ✅ CLEANUP SUCCESSFUL - All weather MCP-only resources removed
+          ✅ CLEANUP SUCCESSFUL - All Dynamic MCP resources removed
           {% else %}
           ⚠️  CLEANUP INCOMPLETE - Remaining resources found
           {% for resource in parsed_resources %}
@@ -226,30 +216,26 @@
           {% endif %}
           
           Resources Processed:
-          ✅ Job: {{ service_name }}-protocol-test
-          ✅ TrafficPolicy: disable-{{ service_name }}-auth
+          ✅ TrafficPolicy: {{ service_name }}-no-auth
           ✅ HTTPRoute: {{ service_name }}-route
-          ✅ Backend: {{ service_name }}-backend
-          ✅ Services: {{ service_name }}, {{ service_name }}-external
+          ✅ Backend: {{ service_name }}-backend (Dynamic MCP, label selectors)
+          ✅ Service: {{ service_name }} (appProtocol: kgateway.dev/mcp)
           ✅ Deployment: {{ service_name }}
           
           Service Details:
           📦 Service Name: {{ service_name }}
-          🎯 Service Type: Pure MCP Protocol (MCP_ONLY=true)
+          🎯 Service Type: Dynamic MCP (label selector-based)
           🌐 Namespace: {{ ai_namespace }}
+          🚀 Transport: StreamableHTTP
           🔧 Cleanup Mode: {{ 'Forced' if (force_cleanup | default(false) | bool) else 'Interactive' }}
           
           {% if parsed_resources | length == 0 %}
-          🎉 MCP-only environment is clean and ready for fresh deployment!
+          🎉 Dynamic MCP environment is clean and ready for fresh deployment!
           
           Next steps:
-          1. Run: ansible-playbook deploy-weather-mcp-only.yml
-          2. Or modify MCP configuration and redeploy
-          
-          MCP Client Testing:
-          # Test pure MCP protocol connectivity
-          Client('http://localhost:3001')  # Direct root access
-          uv run python tools/test_mcp_client.py
+          1. Run: ansible-playbook deploy-weather-mcp-dynamic.yml
+          2. Or deploy Static MCP: ansible-playbook deploy-weather-mcp-only.yml
+          3. Or modify Dynamic MCP configuration and redeploy
           {% else %}
           ⚠️  Manual cleanup may be required for remaining resources.
           

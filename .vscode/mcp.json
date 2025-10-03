@@ -3,7 +3,8 @@
 		// MCP_TRANSPORT=http MCP_HOST=localhost MCP_PORT=3000 MCP_ONLY=true uv run python -m mcp_weather.weather
 		"weather-direct-http": {
 			"type": "http",
-			"url": "http://localhost:3000/mcp/"
+			"url": "http://agentgateway.mixwarecs-home.net/weather-mcp-dynamic/mcp"
+			// "url": "http://localhost:3000/mcp/"
 		},
 		// "weather-specbridge": {
 		// 	"type": "stdio",
