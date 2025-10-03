@@ -92,6 +92,11 @@ kgateway_namespace: "kgateway-system"
 # Container Image
 weather_image: "ghcr.io/geosp/mcp-weather:master"
 
+# Dynamic Code Loading
+# The container uses uvx to dynamically load code from GitHub
+# Benefits: Zero rebuild time, instant version switching, smaller images
+# Usage: Change the git reference in manifests to deploy different versions
+
 # Gateway Configuration
 gateway_hostname: "agentgateway.mixwarecs-home.net"
 ```

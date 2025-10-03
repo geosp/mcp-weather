@@ -19,6 +19,8 @@ This project provides a comprehensive weather service with multiple deployment o
 - ✅ **Kubernetes Ready** - Production deployment with K-Gateway
 - ✅ **Dynamic Backend** - Auto-discovery with label selectors
 - ✅ **VS Code Integration** - Direct MCP extension support
+- ✅ **Dynamic Docker** - uvx-based containers with GitHub code loading
+- ✅ **Zero Rebuild Deployment** - Change code versions without rebuilding images
 
 ## Architecture Comparison
 
@@ -703,16 +705,78 @@ MCP_ONLY=false uv run python -m mcp_weather.weather --transport http --port 8000
 ```
 
 ### Container Development
+
+#### Option 1: Pre-built Images (Recommended)
+Use the pre-built images from GitHub Container Registry that leverage dynamic code loading:
+
+```bash
+# Run latest version directly from GitHub (MCP mode)
+docker run -p 8000:8000 -e MCP_ONLY=true \
+  ghcr.io/geosp/mcp-weather:latest \
+  --from=gh:geosp/mcp-weather \
+  --with=fastmcp \
+  python -m mcp_weather.weather --transport=http --port=8000
+
+# Run specific version (REST mode)
+docker run -p 8000:8000 -e MCP_ONLY=false \
+  ghcr.io/geosp/mcp-weather:v1.0.0 \
+  --from=gh:geosp/mcp-weather@v1.0.0 \
+  --with=fastmcp \
+  python -m mcp_weather.weather --transport=http --port=8000
+```
+
+#### Option 2: Build Locally
 ```bash
 # Build container
 docker build -t mcp-weather .
 
-# Run MCP mode
-docker run -p 8000:8000 -e MCP_ONLY=true mcp-weather
+# Run MCP mode (loads code dynamically from GitHub)
+docker run -p 8000:8000 -e MCP_ONLY=true \
+  mcp-weather \
+  --from=gh:geosp/mcp-weather \
+  --with=fastmcp \
+  python -m mcp_weather.weather --transport=http --port=8000
 
 # Run REST mode
-docker run -p 8000:8000 -e MCP_ONLY=false mcp-weather
+docker run -p 8000:8000 -e MCP_ONLY=false \
+  mcp-weather \
+  --from=gh:geosp/mcp-weather \
+  --with=fastmcp \
+  python -m mcp_weather.weather --transport=http --port=8000
 ```
+
+### Dynamic Code Loading with uvx
+
+This project uses an innovative Docker approach with **uvx dynamic code loading**:
+
+#### How It Works
+- **Container Base**: Contains only Python 3.11 + uvx + git (no source code)
+- **Code Loading**: uvx downloads and runs code directly from GitHub at runtime
+- **Zero Build Time**: No need to rebuild containers for code changes
+- **Version Control**: Pin to specific Git tags, branches, or commits
+- **Hot Updates**: Change code versions without rebuilding images
+
+#### Benefits
+- ✅ **Instant Deployment**: No build time, immediate code updates
+- ✅ **Version Flexibility**: Switch between any Git version instantly  
+- ✅ **Reduced Image Size**: Base image ~200MB vs ~500MB+ with source
+- ✅ **CI/CD Efficiency**: Build once, run any version
+- ✅ **Development Speed**: Test different versions without rebuilds
+
+#### uvx Command Breakdown
+```bash
+uvx \
+  --from=gh:geosp/mcp-weather@v1.0.0 \  # GitHub repo + version
+  --with=fastmcp \                      # Additional dependencies
+  python -m mcp_weather.weather \       # Module to run
+  --transport=http --port=8000          # Application arguments
+```
+
+#### CI/CD Pipeline
+- **Trigger**: Push to main/master or version tags
+- **Registry**: GitHub Container Registry (ghcr.io)
+- **Automation**: GitHub Actions builds and publishes base images
+- **Tagging**: Semantic versioning + branch names + commit SHAs
 
 ### Testing Locally
 ```bash
@@ -771,7 +835,14 @@ curl http://localhost:8000/health
 - **Framework**: FastMCP 2.0 + FastAPI
 - **Dependencies**: aiohttp, uvicorn, python-dotenv
 - **Features**: Location caching, comprehensive error handling
-- **Container**: Docker with uvx entrypoint for git-based installation
+- **Container**: Docker with uvx entrypoint for dynamic GitHub code loading
+
+### Container Architecture
+- **Base Image**: python:3.11-slim + uvx + git (~200MB)
+- **Code Source**: Dynamic loading from GitHub repository
+- **Deployment**: uvx downloads and runs specified Git version at startup
+- **Benefits**: Zero rebuild time, instant version switching, smaller images
+- **CI/CD**: GitHub Actions publishes base images to GHCR automatically
 
 ### MCP Protocol Integration
 - **Protocol Version**: 2024-11-05
