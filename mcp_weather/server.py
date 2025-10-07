@@ -19,7 +19,7 @@ from .config import get_config, load_config, AppConfig
 from .cache import LocationCache
 from .weather_service import WeatherService
 try:
-    from core.auth_provider import create_auth_provider
+    from core.auth_mcp import create_auth_provider
     CORE_AUTH_AVAILABLE = True
 except ImportError:
     CORE_AUTH_AVAILABLE = False

@@ -7,10 +7,10 @@ It integrates with the existing Authentik client to validate tokens and extract 
 
 import logging
 import flatdict
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from fastmcp.server.auth import AuthProvider
-from .auth import get_authentik_client
+from .auth_rest import get_authentik_client
 
 logger = logging.getLogger(__name__)
 

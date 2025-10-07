@@ -43,7 +43,7 @@ from .config import (
 from .weather_service import WeatherService
 from .cache import LocationCache, LocationData
 # Import authentication components directly from core
-from core.auth_provider import (
+from core.auth_mcp import (
     AuthentikAuthProvider,
     AuthInfo
 )

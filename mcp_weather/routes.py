@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 # Import your existing auth dependency
-from core.auth import get_token_from_header
+from core.auth_rest import get_token_from_header
 
 from .weather_service import WeatherService
 from .models import (

@@ -5,7 +5,7 @@ This module provides reusable authentication dependencies for protecting
 FastAPI endpoints with Bearer token authentication validated via Authentik API.
 
 Usage Example:
-    from core.auth import get_token_from_header
+    from core.auth_rest import get_token_from_header
     
     @app.get("/protected")
     async def protected_route(user: dict = Depends(get_token_from_header)):

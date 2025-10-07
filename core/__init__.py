@@ -12,7 +12,7 @@ from .config import (
     BaseServerConfig,
 )
 
-from .auth import (
+from .auth_rest import (
     get_authentik_client,
     get_token_from_header,
 )
@@ -21,7 +21,7 @@ from .authentik_client import (
     AuthentikClient,
 )
 
-from .auth_provider import (
+from .auth_mcp import (
     AuthInfo,
     AuthentikAuthProvider,
     create_auth_provider,

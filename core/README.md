@@ -6,9 +6,9 @@ This directory contains reusable infrastructure components that can be shared ac
 
 ### 1. Authentication
 
-- **auth.py**: FastAPI authentication dependencies for Bearer token validation with Authentik
+- **auth_rest.py**: FastAPI authentication dependencies for REST API with Authentik
+- **auth_mcp.py**: MCP authentication providers for FastMCP integration
 - **authentik_client.py**: Client for interacting with Authentik API
-- **auth_provider.py**: Base MCP authentication providers for FastMCP integration
 
 ### 2. Configuration
 
@@ -23,11 +23,11 @@ This directory contains reusable infrastructure components that can be shared ac
 
 ```python
 # Get a ready-to-use Authentik auth provider
-from core.auth_provider import get_auth_provider
+from core.auth_mcp import get_auth_provider
 auth_provider = get_auth_provider("my-service")
 
 # Or create a new instance
-from core.auth_provider import create_auth_provider
+from core.auth_mcp import create_auth_provider
 auth_provider = create_auth_provider("my-service")
 
 # Use with FastMCP
