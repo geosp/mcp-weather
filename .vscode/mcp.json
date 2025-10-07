@@ -1,10 +1,13 @@
 {
 	"servers": {
-		// MCP_TRANSPORT=http MCP_HOST=localhost MCP_PORT=3000 MCP_ONLY=true uv run python -m mcp_weather.weather
+		// MCP_TRANSPORT=http MCP_ONLY=true uv run mcp-weather
 		"weather-direct-http": {
 			"type": "http",
-			"url": "http://agentgateway.mixwarecs-home.net/weather-mcp",
-			// "url": "http://localhost:3000/mcp/"
+			// "url": "http://agentgateway.mixwarecs-home.net/weather-mcp",
+			"url": "http://localhost:3000/mcp",
+			"headers": {
+				"Authorization": "Bearer iaOPJQ29pv9gVVepAA89ZCLvM7eDbc4dbPGRxLl6dtLCFxNRNgU5Ygr0hMlP"
+			}
 		},
 		// "weather-specbridge": {
 		// 	"type": "stdio",
@@ -14,7 +17,7 @@
 		// "weather-direct": {
 		// 	"type": "stdio",
 		// 	"command": "/home/geo/projects/mcp/mcp-weather/.venv/bin/python",
-		// 	"args": ["-m", "mcp_weather.weather"]
+		// 	"args": ["-m", "mcp_weather.server"]
 		// },
 	},
 	"inputs": []
