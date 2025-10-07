@@ -42,10 +42,10 @@ from .config import (
 )
 from .weather_service import WeatherService
 from .cache import LocationCache, LocationData
-from .auth_provider import (
+# Import authentication components directly from core
+from core.auth_provider import (
     AuthentikAuthProvider,
-    get_mcp_auth_provider,
-    initialize_mcp_auth
+    AuthInfo
 )
 
 __version__ = "2.0.0"
@@ -75,8 +75,7 @@ __all__ = [
     
     # Authentication
     "AuthentikAuthProvider",
-    "get_mcp_auth_provider",
-    "initialize_mcp_auth",
+    "AuthInfo",
     
     # Metadata
     "__version__",

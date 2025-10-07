@@ -3,19 +3,20 @@ CLI for Authentik user and token management.
 
 Usage Examples:
     # Create a user
-    python tools/main.py create-user --username adam --name "Adam Firstman" --email adam@example.com --password secret123
+    uv run python tools/authentik_manager.py create-user --username adam --name "Adam Firstman" --email adam@example.com --password secret123
     
     # Generate a token (displays the actual Bearer token)
-    python tools/main.py generate-token 5 --name "adam-api-token"
-    
+    uv run python tools/authentik_manager.py generate-token 5 --name "adam-api-token"
+
     # Validate a token
-    python tools/main.py validate-token <actual-token-string>
+    uv run python tools/authentik_manager.py validate-token <actual-token-string>
 """
 
 import argparse
 import os
 import json
 from core.authentik_client import AuthentikClient
+from core.config import AuthentikConfig
 
 
 def print_token_info(token_response):
@@ -151,17 +152,26 @@ Environment Variables:
         """
     )
     
+    # Try to load from config first, then fall back to direct env vars
+    try:
+        config = AuthentikConfig.from_env_optional()
+        default_url = config.api_url if config else os.getenv('AUTHENTIK_API_URL')
+        default_token = config.api_token if config else os.getenv('AUTHENTIK_API_TOKEN')
+    except:
+        default_url = os.getenv('AUTHENTIK_API_URL')
+        default_token = os.getenv('AUTHENTIK_API_TOKEN')
+        
     parser.add_argument(
         '--api-url', 
         required=False, 
         help='Authentik API URL (or set AUTHENTIK_API_URL)', 
-        default=os.getenv('AUTHENTIK_API_URL')
+        default=default_url
     )
     parser.add_argument(
         '--token', 
         required=False, 
         help='Authentik Admin API Token (or set AUTHENTIK_API_TOKEN)', 
-        default=os.getenv('AUTHENTIK_API_TOKEN')
+        default=default_token
     )
     parser.add_argument(
         '--debug',

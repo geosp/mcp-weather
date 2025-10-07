@@ -18,7 +18,12 @@ import uvicorn
 from .config import get_config, load_config, AppConfig
 from .cache import LocationCache
 from .weather_service import WeatherService
-from mcp_weather.auth_provider import get_mcp_auth_provider, initialize_mcp_auth
+try:
+    from core.auth_provider import create_auth_provider
+    CORE_AUTH_AVAILABLE = True
+except ImportError:
+    CORE_AUTH_AVAILABLE = False
+    create_auth_provider = None
 from .routes import create_router
 from .tools import register_tools
 
@@ -67,8 +72,17 @@ def create_mcp_app(config: AppConfig) -> FastMCP:
     # Initialize authentication if using HTTP transport
     auth_provider = None
     if config.server.transport == "http" and config.authentik:
-        auth_provider = initialize_mcp_auth()
-        logger.info("MCP authentication enabled")
+        if CORE_AUTH_AVAILABLE:
+            try:
+                # Create a service-specific auth provider for weather
+                auth_provider = create_auth_provider("weather")
+                logger.info("MCP authentication enabled using core auth provider")
+            except Exception as e:
+                logger.warning(f"Failed to create auth provider: {e}")
+                logger.error(f"Authentication initialization failed: {e}")
+        else:
+            logger.error("Core auth provider not available - authentication disabled")
+            logger.error("Please ensure core.auth_provider is accessible")
     
     # Create MCP server
     mcp = FastMCP(
@@ -138,6 +152,44 @@ def create_fastapi_app(config: AppConfig, mcp: FastMCP) -> FastAPI:
     
     # Mount MCP server at /mcp
     app.mount("/mcp", mcp_app)
+    
+    # Add exception handlers to the main app
+    from fastapi import HTTPException
+    from fastapi.responses import JSONResponse
+    from fastapi.exceptions import RequestValidationError
+    from datetime import datetime
+    from .models import ErrorResponse, ErrorDetail
+    
+    @app.exception_handler(HTTPException)
+    async def app_http_exception_handler(request, exc):
+        """Handle HTTP exceptions with custom format"""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=ErrorResponse(
+                success=False,
+                error=ErrorDetail(
+                    message=exc.detail,
+                    error_code=f"HTTP_{exc.status_code}"
+                ),
+                timestamp=datetime.utcnow()
+            ).model_dump()
+        )
+    
+    @app.exception_handler(RequestValidationError)
+    async def app_validation_exception_handler(request, exc):
+        """Handle validation errors with custom format"""
+        return JSONResponse(
+            status_code=422,
+            content=ErrorResponse(
+                success=False,
+                error=ErrorDetail(
+                    message="Validation error",
+                    error_code="VALIDATION_ERROR",
+                    details=exc.errors()
+                ),
+                timestamp=datetime.utcnow()
+            ).model_dump()
+        )
     
     logger.info("FastAPI application created with MCP mounted at /mcp")
     return app

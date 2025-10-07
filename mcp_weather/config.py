@@ -1,69 +1,38 @@
 """
 Configuration management for Weather MCP Server
 
-Handles environment variables and provides typed configuration objects.
-All configuration is loaded from environment variables with sensible defaults.
+Handles environment variables and provides typed configuration objects
+specific to the weather service. Extends core configuration classes.
 """
 
 import os
 from pathlib import Path
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator
-from dotenv import load_dotenv
 
-# Load environment variables from .env file if present
+from core.config import (
+    AuthentikConfig,
+    BaseCacheConfig,
+    BaseServerConfig,
+    load_dotenv
+)
+
+# Ensure environment variables are loaded
 load_dotenv()
 
 
-class AuthentikConfig(BaseModel):
-    """
-    Authentik authentication configuration
-    
-    Required for HTTP transport mode to validate Bearer tokens.
-    Not needed for stdio mode.
-    """
-    api_url: str = Field(..., description="Authentik API URL (e.g., http://authentik.example.com/api/v3)")
-    api_token: str = Field(..., description="Authentik API token for authentication")
-    
-    @classmethod
-    def from_env(cls) -> "AuthentikConfig":
-        """Load Authentik configuration from environment variables"""
-        api_url = os.getenv("AUTHENTIK_API_URL")
-        api_token = os.getenv("AUTHENTIK_API_TOKEN")
-        
-        if not api_url or not api_token:
-            raise ValueError(
-                "AUTHENTIK_API_URL and AUTHENTIK_API_TOKEN environment variables must be set for HTTP mode"
-            )
-        
-        return cls(api_url=api_url, api_token=api_token)
-    
-    @classmethod
-    def from_env_optional(cls) -> Optional["AuthentikConfig"]:
-        """Load Authentik config if available, return None if not configured"""
-        try:
-            return cls.from_env()
-        except ValueError:
-            return None
-
-
-class CacheConfig(BaseModel):
+class CacheConfig(BaseCacheConfig):
     """
     Location cache configuration
     
     Caches geocoded location coordinates to reduce API calls.
     Uses JSON file storage in user's cache directory.
     """
-    cache_dir: Path = Field(
-        default_factory=lambda: Path.home() / ".cache" / "weather",
-        description="Directory for cache files"
-    )
-    expiry_days: int = Field(
-        default=30, 
-        ge=1, 
-        le=365,
-        description="Number of days before cached location data expires"
-    )
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Override cache_dir with weather-specific subfolder
+        if "cache_dir" not in data:
+            self.cache_dir = Path.home() / ".cache" / "weather"
     
     @property
     def location_cache_file(self) -> Path:
@@ -72,66 +41,37 @@ class CacheConfig(BaseModel):
     
     @classmethod
     def from_env(cls) -> "CacheConfig":
-        """Load cache configuration from environment variables"""
-        cache_dir = os.getenv("CACHE_DIR")
-        expiry_days = os.getenv("CACHE_EXPIRY_DAYS")
-        
-        kwargs = {}
-        if cache_dir:
-            kwargs["cache_dir"] = Path(cache_dir)
-        if expiry_days:
-            kwargs["expiry_days"] = int(expiry_days)
-        
-        return cls(**kwargs)
+        """Load weather-specific cache configuration from environment variables"""
+        return super().from_env(env_prefix="WEATHER_")
 
 
-class ServerConfig(BaseModel):
+class ServerConfig(BaseServerConfig):
     """
-    HTTP server configuration
+    Weather MCP server configuration
     
-    Controls how the server listens for connections when using HTTP transport.
+    Controls how the server listens for connections and operational mode.
     """
     transport: Literal["stdio", "http"] = Field(
         default="stdio",
         description="Transport mode: 'stdio' for direct MCP, 'http' for web server"
-    )
-    host: str = Field(
-        default="0.0.0.0",
-        description="Bind address (0.0.0.0 = all interfaces)"
-    )
-    port: int = Field(
-        default=3000,
-        ge=1,
-        le=65535,
-        description="Port number for HTTP server"
     )
     mcp_only: bool = Field(
         default=False,
         description="If True, serve pure MCP protocol; if False, serve REST + MCP"
     )
     
-    @field_validator("host")
-    @classmethod
-    def validate_host(cls, v: str) -> str:
-        """Validate host is a valid format"""
-        if not v or v.strip() == "":
-            raise ValueError("Host cannot be empty")
-        return v.strip()
-    
     @classmethod
     def from_env(cls) -> "ServerConfig":
-        """Load server configuration from environment variables"""
+        """Load weather server configuration from environment variables"""
+        config = super().from_env(env_prefix="MCP_")
+        
         transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
-        host = os.getenv("MCP_HOST", "0.0.0.0")
-        port = int(os.getenv("MCP_PORT", "3000"))
         mcp_only = os.getenv("MCP_ONLY", "false").lower() == "true"
         
-        return cls(
-            transport=transport,
-            host=host,
-            port=port,
-            mcp_only=mcp_only
-        )
+        config.transport = transport
+        config.mcp_only = mcp_only
+        
+        return config
 
 
 class WeatherAPIConfig(BaseModel):
@@ -186,7 +126,7 @@ class AppConfig(BaseModel):
         # Only load Authentik config if using HTTP transport
         authentik = None
         if server.transport == "http":
-            authentik = AuthentikConfig.from_env()
+            authentik = AuthentikConfig.from_env_optional()
         
         return cls(
             server=server,

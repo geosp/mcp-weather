@@ -319,28 +319,7 @@ def create_router(weather_service: WeatherService) -> APIRouter:
                 detail="Internal server error"
             )
     
-    # ========================================================================
-    # Error Handlers
-    # ========================================================================
-    
-    @router.exception_handler(HTTPException)
-    async def http_exception_handler(request, exc: HTTPException):
-        """
-        Custom handler for HTTP exceptions
-        
-        Wraps HTTP exceptions in standardized error response format.
-        """
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=ErrorResponse(
-                success=False,
-                error=ErrorDetail(
-                    message=exc.detail,
-                    error_code=f"HTTP_{exc.status_code}"
-                ),
-                timestamp=datetime.utcnow()
-            ).model_dump()
-        )
+    # Error handlers moved to server.py FastAPI app
     
     logger.info("Weather routes registered successfully")
     return router

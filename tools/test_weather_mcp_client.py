@@ -9,8 +9,15 @@ Requirements:
     - AUTHENTIK_TOKEN environment variable set
     
 Usage:
-    export AUTHENTIK_TOKEN="your-token-here"
-    python test_mcp_client.py
+    # Set up environment with uv
+    uv venv .venv
+    uv pip install -e .
+    
+    # Run with the convenience script (recommended):
+    ./run-test.sh YOUR_AUTHENTIK_TOKEN
+    
+    # Or run directly with the token as a parameter:
+    AUTHENTIK_TOKEN="your-token-here" uv run python tools/test_mcp_client.py
 """
 
 import os

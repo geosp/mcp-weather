@@ -12,11 +12,11 @@ Usage Example:
         return {"message": f"Hello {user['username']}"}
 """
 
-import os
 from typing import Dict
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from .authentik_client import AuthentikClient
+from .config import AuthentikConfig
 
 # HTTPBearer instance for extracting Bearer tokens from Authorization header
 security = HTTPBearer()
@@ -26,7 +26,7 @@ def get_authentik_client() -> AuthentikClient:
     """
     Create and return an Authentik API client instance.
     
-    This function retrieves Authentik configuration from environment variables
+    This function retrieves Authentik configuration using AuthentikConfig
     and initializes the client. It's used as a FastAPI dependency.
     
     Returns:
@@ -35,21 +35,16 @@ def get_authentik_client() -> AuthentikClient:
     Raises:
         RuntimeError: If AUTHENTIK_API_URL or AUTHENTIK_API_TOKEN are not set
         
-    Environment Variables:
-        AUTHENTIK_API_URL: Base URL of Authentik API (e.g., http://authentik.example.com/api/v3)
-        AUTHENTIK_API_TOKEN: Admin API token for authentication
-        
     Example:
         >>> client = get_authentik_client()
         >>> result = client.validate_token(user_token)
     """
-    api_url = os.getenv("AUTHENTIK_API_URL")
-    api_token = os.getenv("AUTHENTIK_API_TOKEN")
-    
-    if not api_url or not api_token:
+    try:
+        config = AuthentikConfig.from_env()
+        return AuthentikClient(config.api_url, config.api_token)
+    except ValueError as e:
         raise RuntimeError(
-            "AUTHENTIK_API_URL and AUTHENTIK_API_TOKEN must be set in environment. "
-            "These are required for authentication to work."
+            "Authentik configuration error: Authentication will not work. " + str(e)
         )
     
     return AuthentikClient(api_url, api_token)
