@@ -27,9 +27,8 @@ License: MIT
 from .server import (
     main,
     create_app,
-    create_mcp_app,
-    create_fastapi_app,
-    create_weather_service
+    WeatherMCPService,
+    WeatherMCPServer
 )
 from .config import (
     get_config,
@@ -55,9 +54,8 @@ __all__ = [
     # Server functions
     "main",
     "create_app",
-    "create_mcp_app",
-    "create_fastapi_app",
-    "create_weather_service",
+    "WeatherMCPService",
+    "WeatherMCPServer",
     
     # Configuration
     "get_config",

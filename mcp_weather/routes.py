@@ -22,7 +22,6 @@ from .models import (
     HealthResponse,
     ServiceInfo,
     ErrorResponse,
-    ErrorDetail
 )
 
 logger = logging.getLogger(__name__)
