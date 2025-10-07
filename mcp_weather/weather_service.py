@@ -1,0 +1,479 @@
+"""
+Weather service for interacting with Open-Meteo API
+
+Handles geocoding, weather data fetching, and data transformation.
+Provides clean abstraction over the Open-Meteo API.
+"""
+
+import logging
+from typing import Dict, Any, List, Optional
+
+from aiohttp import ClientSession, ClientError, ClientTimeout
+from fastapi import HTTPException
+
+from .config import WeatherAPIConfig
+from .cache import LocationCache, LocationData
+from .models import (
+    WeatherResponse,
+    CurrentConditions,
+    HourlyForecast,
+    Coordinates,
+    Measurement,
+    WindData
+)
+
+logger = logging.getLogger(__name__)
+
+
+class WeatherService:
+    """
+    Handles all weather API interactions using Open-Meteo API
+    
+    This service provides a complete weather data pipeline:
+    1. Location validation and sanitization
+    2. Geocoding (location name -> coordinates) with caching
+    3. Weather data fetching from Open-Meteo API
+    4. Data formatting and standardization
+    5. Weather code translation to human-readable descriptions
+    
+    Features:
+        - Free Open-Meteo API (no API key required)
+        - Location coordinate caching with expiry (30 days)
+        - Comprehensive error handling and validation
+        - WMO weather code translation
+        - Wind direction formatting
+        - Structured response models
+    
+    APIs Used:
+        - Open-Meteo Geocoding API: https://geocoding-api.open-meteo.com/v1/search
+        - Open-Meteo Weather API: https://api.open-meteo.com/v1/forecast
+    """
+    
+    # WMO Weather Code Mappings
+    WEATHER_CODES = {
+        0: "Clear sky",
+        1: "Mainly clear",
+        2: "Partly cloudy",
+        3: "Overcast",
+        45: "Foggy",
+        48: "Depositing rime fog",
+        51: "Light drizzle",
+        53: "Moderate drizzle",
+        55: "Dense drizzle",
+        61: "Slight rain",
+        63: "Moderate rain",
+        65: "Heavy rain",
+        71: "Slight snow",
+        73: "Moderate snow",
+        75: "Heavy snow",
+        77: "Snow grains",
+        80: "Slight rain showers",
+        81: "Moderate rain showers",
+        82: "Violent rain showers",
+        85: "Slight snow showers",
+        86: "Heavy snow showers",
+        95: "Thunderstorm",
+        96: "Thunderstorm with slight hail",
+        99: "Thunderstorm with heavy hail"
+    }
+    
+    # Cardinal directions for wind
+    WIND_DIRECTIONS = [
+        "N", "NNE", "NE", "ENE", 
+        "E", "ESE", "SE", "SSE",
+        "S", "SSW", "SW", "WSW", 
+        "W", "WNW", "NW", "NNW"
+    ]
+    
+    def __init__(self, api_config: WeatherAPIConfig, cache: LocationCache):
+        """
+        Initialize weather service
+        
+        Args:
+            api_config: Weather API configuration with endpoint URLs
+            cache: Location cache for storing geocoded coordinates
+        """
+        self.geocoding_url = api_config.geocoding_url
+        self.weather_url = api_config.weather_url
+        self.cache = cache
+        
+        # HTTP client timeout configuration
+        self.timeout = ClientTimeout(total=30, connect=10)
+        
+        logger.info(
+            f"Initialized WeatherService with geocoding={self.geocoding_url}, "
+            f"weather={self.weather_url}"
+        )
+    
+    def _validate_location(self, location: str) -> str:
+        """
+        Validate and sanitize location input
+        
+        Args:
+            location: Raw location string from user
+            
+        Returns:
+            Sanitized location string
+            
+        Raises:
+            ValueError: If location is empty or too long
+        """
+        if not location or not location.strip():
+            raise ValueError("Location cannot be empty")
+        
+        location = location.strip()
+        
+        if len(location) > 100:
+            raise ValueError("Location name too long (max 100 characters)")
+        
+        return location
+    
+    def _format_weather_code(self, code: int) -> str:
+        """
+        Convert WMO weather code to human-readable description
+        
+        Args:
+            code: WMO weather code (0-99)
+            
+        Returns:
+            Weather description string
+        """
+        return self.WEATHER_CODES.get(code, f"Unknown ({code})")
+    
+    def _format_wind_direction(self, degrees: float) -> str:
+        """
+        Convert wind direction degrees to cardinal direction
+        
+        Args:
+            degrees: Wind direction in degrees (0-360)
+            
+        Returns:
+            Cardinal direction (N, NE, E, SE, etc.)
+        """
+        if degrees < 0 or degrees > 360:
+            return "Unknown"
+        
+        idx = int((degrees + 11.25) / 22.5) % 16
+        return self.WIND_DIRECTIONS[idx]
+    
+    async def _geocode_location(
+        self, 
+        session: ClientSession, 
+        location: str
+    ) -> LocationData:
+        """
+        Convert location name to coordinates using Open-Meteo Geocoding API
+        
+        Args:
+            session: aiohttp client session
+            location: Location name to geocode
+            
+        Returns:
+            LocationData with coordinates and metadata
+            
+        Raises:
+            HTTPException: 404 if location not found, 500 for API errors
+        """
+        params = {
+            "name": location,
+            "count": 1,
+            "language": "en",
+            "format": "json"
+        }
+        
+        try:
+            async with session.get(
+                self.geocoding_url, 
+                params=params,
+                timeout=self.timeout
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.error(
+                        f"Geocoding API error: HTTP {resp.status}",
+                        extra={"response": text[:200]}
+                    )
+                    raise HTTPException(
+                        status_code=resp.status,
+                        detail=f"Geocoding failed: {text[:100]}"
+                    )
+                
+                data = await resp.json()
+                results = data.get("results")
+                
+                if not results:
+                    logger.warning(f"Location not found: {location}")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Location not found: {location}"
+                    )
+                
+                result = results[0]
+                
+                location_data = LocationData(
+                    latitude=result["latitude"],
+                    longitude=result["longitude"],
+                    name=result["name"],
+                    country=result.get("country", ""),
+                    timezone=result.get("timezone", "auto")
+                )
+                
+                logger.info(
+                    f"Geocoded {location} -> {location_data.name}, "
+                    f"{location_data.country} ({location_data.latitude}, {location_data.longitude})"
+                )
+                
+                return location_data
+                
+        except HTTPException:
+            raise
+        except ClientError as e:
+            logger.error(f"Geocoding network error: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Geocoding service unavailable"
+            )
+        except Exception as e:
+            logger.error(f"Geocoding unexpected error: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Geocoding service error"
+            )
+    
+    async def _fetch_weather(
+        self,
+        session: ClientSession,
+        latitude: float,
+        longitude: float,
+        timezone: str = "auto"
+    ) -> Dict[str, Any]:
+        """
+        Fetch weather data from Open-Meteo API
+        
+        Args:
+            session: aiohttp client session
+            latitude: Latitude in decimal degrees
+            longitude: Longitude in decimal degrees
+            timezone: Timezone identifier or "auto"
+            
+        Returns:
+            Raw weather data dictionary from API
+            
+        Raises:
+            HTTPException: For API errors or network issues
+        """
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": "temperature_2m,relative_humidity_2m,apparent_temperature,"
+                      "precipitation,weather_code,wind_speed_10m,wind_direction_10m",
+            "hourly": "temperature_2m,precipitation_probability,precipitation,"
+                     "weather_code,wind_speed_10m",
+            "temperature_unit": "celsius",
+            "wind_speed_unit": "kmh",
+            "precipitation_unit": "mm",
+            "timezone": timezone,
+            "forecast_days": 1
+        }
+        
+        try:
+            async with session.get(
+                self.weather_url,
+                params=params,
+                timeout=self.timeout
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.error(
+                        f"Weather API error: HTTP {resp.status}",
+                        extra={"response": text[:200]}
+                    )
+                    raise HTTPException(
+                        status_code=resp.status,
+                        detail=f"Weather fetch failed: {text[:100]}"
+                    )
+                
+                data = await resp.json()
+                logger.debug(f"Fetched weather data for ({latitude}, {longitude})")
+                return data
+                
+        except HTTPException:
+            raise
+        except ClientError as e:
+            logger.error(f"Weather API network error: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Weather service unavailable"
+            )
+        except Exception as e:
+            logger.error(f"Weather API unexpected error: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Weather service error"
+            )
+    
+    def _build_current_conditions(self, current_data: Dict[str, Any]) -> CurrentConditions:
+        """
+        Build CurrentConditions model from API data
+        
+        Args:
+            current_data: Current weather data from API
+            
+        Returns:
+            CurrentConditions model instance
+        """
+        return CurrentConditions(
+            temperature=Measurement(
+                value=current_data.get("temperature_2m"),
+                unit="°C"
+            ),
+            feels_like=Measurement(
+                value=current_data.get("apparent_temperature"),
+                unit="°C"
+            ),
+            humidity=Measurement(
+                value=current_data.get("relative_humidity_2m"),
+                unit="%"
+            ),
+            precipitation=Measurement(
+                value=current_data.get("precipitation"),
+                unit="mm"
+            ),
+            wind=WindData(
+                speed=current_data.get("wind_speed_10m"),
+                direction_degrees=current_data.get("wind_direction_10m"),
+                direction=self._format_wind_direction(
+                    current_data.get("wind_direction_10m", 0)
+                ),
+                unit="km/h"
+            ),
+            weather=self._format_weather_code(
+                current_data.get("weather_code", 0)
+            ),
+            time=current_data.get("time", "")
+        )
+    
+    def _build_hourly_forecast(self, hourly_data: Dict[str, Any]) -> List[HourlyForecast]:
+        """
+        Build list of HourlyForecast models from API data
+        
+        Args:
+            hourly_data: Hourly weather data from API
+            
+        Returns:
+            List of HourlyForecast models (next 12 hours)
+        """
+        forecast = []
+        
+        if not hourly_data or "time" not in hourly_data:
+            return forecast
+        
+        # Extract arrays (limit to 12 hours)
+        times = hourly_data.get("time", [])[:12]
+        temps = hourly_data.get("temperature_2m", [])[:12]
+        precip_prob = hourly_data.get("precipitation_probability", [])[:12]
+        precip = hourly_data.get("precipitation", [])[:12]
+        weather_codes = hourly_data.get("weather_code", [])[:12]
+        wind_speeds = hourly_data.get("wind_speed_10m", [])[:12]
+        
+        # Build forecast entries
+        for i, time in enumerate(times):
+            forecast.append(
+                HourlyForecast(
+                    time=time,
+                    temperature=Measurement(
+                        value=temps[i] if i < len(temps) else None,
+                        unit="°C"
+                    ),
+                    precipitation_probability=Measurement(
+                        value=precip_prob[i] if i < len(precip_prob) else None,
+                        unit="%"
+                    ),
+                    precipitation=Measurement(
+                        value=precip[i] if i < len(precip) else None,
+                        unit="mm"
+                    ),
+                    weather=self._format_weather_code(
+                        weather_codes[i] if i < len(weather_codes) else 0
+                    ),
+                    wind_speed=Measurement(
+                        value=wind_speeds[i] if i < len(wind_speeds) else None,
+                        unit="km/h"
+                    )
+                )
+            )
+        
+        return forecast
+    
+    async def get_weather(self, location: str) -> WeatherResponse:
+        """
+        Get complete weather information for a location
+        
+        This is the main public method that orchestrates the entire workflow:
+        1. Validate location
+        2. Check cache for coordinates
+        3. Geocode if not cached
+        4. Fetch weather data
+        5. Transform to response model
+        
+        Args:
+            location: City name (e.g., "Tallahassee", "New York", "London")
+            
+        Returns:
+            WeatherResponse with location info, current conditions, and forecast
+            
+        Raises:
+            ValueError: If location is invalid
+            HTTPException: If geocoding or weather fetch fails
+        """
+        # Validate input
+        location = self._validate_location(location)
+        logger.info(f"Fetching weather for: {location}")
+        
+        # Check cache for coordinates
+        cached_location = self.cache.get(location)
+        
+        async with ClientSession() as session:
+            # Get location coordinates (from cache or API)
+            if cached_location:
+                logger.info(f"Using cached coordinates for {location}")
+                location_data = cached_location
+            else:
+                logger.info(f"Cache miss, geocoding {location}")
+                location_data = await self._geocode_location(session, location)
+                self.cache.set(location, location_data)
+            
+            # Fetch weather data
+            weather_data = await self._fetch_weather(
+                session,
+                location_data.latitude,
+                location_data.longitude,
+                location_data.timezone
+            )
+        
+        # Extract and transform data
+        current_data = weather_data.get("current", {})
+        hourly_data = weather_data.get("hourly", {})
+        
+        current_conditions = self._build_current_conditions(current_data)
+        hourly_forecast = self._build_hourly_forecast(hourly_data)
+        
+        # Build response
+        response = WeatherResponse(
+            location=location_data.name,
+            country=location_data.country,
+            coordinates=Coordinates(
+                latitude=location_data.latitude,
+                longitude=location_data.longitude
+            ),
+            timezone=weather_data.get("timezone", "UTC"),
+            current_conditions=current_conditions,
+            hourly_forecast=hourly_forecast
+        )
+        
+        logger.info(
+            f"Successfully fetched weather for {location}: "
+            f"{current_conditions.temperature.value}°C, {current_conditions.weather}"
+        )
+        
+        return response

@@ -5,10 +5,11 @@ description = "Weather forecast tool for MCP"
 authors = []
 dependencies = [
     "python-dotenv",
+    "flatdict",
     "aiohttp",
     "uvicorn",
     "fastapi",   # <-- add this
-    "fastmcp @ git+https://github.com/jlowin/fastmcp.git",
+    "fastmcp>=2.0.0"
 ]
 
 [build-system]
@@ -16,7 +17,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-mcp-weather = "mcp_weather.weather:main"
+mcp-weather = "mcp_weather.server:main"
 
 [tool.hatch.metadata]
 allow-direct-references = true
