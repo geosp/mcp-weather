@@ -7,7 +7,7 @@
     },
     "servers": [
         {
-            "url": "http://agentgateway.mixwarecs-home.net/weather-api",
+            "url": "http://agentgateway.mixwarecs-home.net/weather-rest/",
             "description": "Weather service deployment"
         }
     ],
