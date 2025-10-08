@@ -61,6 +61,9 @@ async def get_token_from_header(
     It extracts the Bearer token from the Authorization header,
     validates it against Authentik, and returns the user object.
     
+    If authentication is disabled via configuration, this function 
+    will return a mock user without validating the token.
+    
     Args:
         credentials: Bearer token credentials from Authorization header
         client: Authentik API client (injected by dependency)
@@ -75,13 +78,31 @@ async def get_token_from_header(
             - groups: List of user groups
             
     Raises:
-        HTTPException: 401 if token is missing, empty, invalid, or inactive
+        HTTPException: 401 if token is missing, empty, invalid, or inactive (when auth is enabled)
         
     Example:
         @app.get("/api/data")
         async def get_data(user: dict = Depends(get_token_from_header)):
             return {"data": "secret", "user": user["username"]}
     """
+    # Check if authentication is enabled in configuration
+    from mcp_weather.config import get_config
+    auth_enabled = get_config().server.auth_enabled
+    
+    # If authentication is disabled, return a mock user without validation
+    if not auth_enabled:
+        import logging
+        logging.getLogger(__name__).warning("⚠️ Authentication is DISABLED. Using mock user. Not secure for production!")
+        return {
+            "pk": 0,
+            "username": "mock_user",
+            "email": "mock@example.com",
+            "name": "Authentication Disabled",
+            "is_active": True,
+            "groups": ["mock_users"]
+        }
+    
+    # If we reach here, authentication is enabled - validate the token
     token_value = credentials.credentials
     
     if not token_value:

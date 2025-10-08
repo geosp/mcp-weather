@@ -28,6 +28,13 @@ This project uses `uv` for Python package management.
 # Run in MCP-only mode
 ./run-server.sh
 
+# Run in REST+MCP mode
+./run-server.sh rest
+
+# Run with authentication disabled (useful for development/testing)
+./run-server.sh mcp noauth
+./run-server.sh rest noauth
+
 # Run in REST API mode (includes MCP endpoints)
 ./run-server.sh rest
 ```

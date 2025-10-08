@@ -28,11 +28,12 @@ from mcp_weather.shared.models import ErrorResponse, ErrorDetail
 from mcp_weather.features import hourly_weather
 
 try:
-    from core.auth_mcp import create_auth_provider
+    from core.auth_mcp import create_auth_provider, get_auth_provider
     CORE_AUTH_AVAILABLE = True
 except ImportError:
     CORE_AUTH_AVAILABLE = False
     create_auth_provider = None
+    get_auth_provider = None
 
 # Configure logging
 logging.basicConfig(
@@ -142,9 +143,9 @@ class WeatherMCPServer(BaseMCPServer):
         if hasattr(config, "authentik") and config.authentik:
             if CORE_AUTH_AVAILABLE:
                 try:
-                    # Create a service-specific auth provider for weather
-                    auth_provider = create_auth_provider("weather")
-                    logger.info("MCP authentication enabled using core auth provider")
+                    # Get or create a service-specific auth provider for weather using singleton pattern
+                    auth_provider = get_auth_provider("weather")
+                    logger.info("MCP authentication enabled using core auth provider (singleton)")
                 except Exception as e:
                     logger.warning(f"Failed to create auth provider: {e}")
                     logger.error(f"Authentication initialization failed: {e}")
@@ -174,7 +175,9 @@ class WeatherMCPServer(BaseMCPServer):
         main_router = APIRouter()
         
         # Create and mount feature routers
-        hourly_weather_router = hourly_weather.routes.create_router(weather_service)
+        hourly_weather_router = hourly_weather.routes.create_router(
+            weather_service
+        )
         main_router.include_router(hourly_weather_router)
         
         # Add root and health endpoints

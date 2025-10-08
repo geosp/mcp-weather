@@ -289,8 +289,9 @@ print(response.json())
 | `MCP_HOST` | HTTP bind address | `0.0.0.0` | No |
 | `MCP_PORT` | HTTP port | `3000` | No |
 | `MCP_ONLY` | Pure MCP mode (true/false) | `false` | No |
-| `AUTHENTIK_API_URL` | Authentik API URL | - | Yes (HTTP mode) |
-| `AUTHENTIK_API_TOKEN` | Authentik API token | - | Yes (HTTP mode) |
+| `MCP_AUTH_ENABLED` | Enable authentication (true/false) | `true` | No |
+| `AUTHENTIK_API_URL` | Authentik API URL | - | Yes (HTTP mode with MCP_AUTH_ENABLED=true) |
+| `AUTHENTIK_API_TOKEN` | Authentik API token | - | Yes (HTTP mode with MCP_AUTH_ENABLED=true) |
 | `CACHE_DIR` | Cache directory path | `~/.cache/weather` | No |
 | `CACHE_EXPIRY_DAYS` | Cache expiry (days) | `30` | No |
 | `WEATHER_API_URL` | Open-Meteo weather URL | (default) | No |

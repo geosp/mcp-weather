@@ -107,6 +107,14 @@ class BaseServerConfig(BaseModel):
         le=65535,
         description="Port number for HTTP server"
     )
+    transport: str = Field(
+        default="stdio",
+        description="Transport mode: 'stdio' for direct MCP, 'http' for web server"
+    )
+    auth_enabled: bool = Field(
+        default=True,
+        description="Whether authentication is enabled (when transport=http)"
+    )
     
     @classmethod
     def from_env(cls: Type[T], env_prefix: str = "") -> T:
@@ -121,6 +129,9 @@ class BaseServerConfig(BaseModel):
         """
         host = os.getenv(f"{env_prefix}HOST", "0.0.0.0")
         port_str = os.getenv(f"{env_prefix}PORT", "3000")
+        transport = os.getenv(f"{env_prefix}TRANSPORT", "stdio").lower()
+        auth_enabled_str = os.getenv(f"{env_prefix}AUTH_ENABLED", "true").lower()
+        auth_enabled = auth_enabled_str in ("true", "yes", "1", "on")
         
         try:
             port = int(port_str)
@@ -129,7 +140,9 @@ class BaseServerConfig(BaseModel):
             
         kwargs: Dict[str, Any] = {
             "host": host,
-            "port": port
+            "port": port,
+            "transport": transport,
+            "auth_enabled": auth_enabled
         }
         
         return cls(**kwargs)

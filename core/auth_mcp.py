@@ -10,7 +10,7 @@ import flatdict
 from typing import Optional, List, Dict, Any
 
 from fastmcp.server.auth import AuthProvider
-from .auth_rest import get_authentik_client
+from core.auth_rest import get_authentik_client
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +161,10 @@ def create_auth_provider(service_name: str = "service") -> AuthentikAuthProvider
     """
     Create a new Authentik auth provider instance
     
+    Note: In most cases, you should use get_auth_provider() instead to take
+    advantage of the singleton pattern, which reuses a single instance.
+    Only use this function directly when you explicitly need a new instance.
+    
     Args:
         service_name: Name of the service using this auth provider
         
@@ -172,10 +176,13 @@ def create_auth_provider(service_name: str = "service") -> AuthentikAuthProvider
 
 def get_auth_provider(service_name: str = "service") -> AuthentikAuthProvider:
     """
-    Get or create a global Authentik auth provider instance
+    Get or create a global Authentik auth provider instance (SINGLETON PATTERN)
     
     This function implements the singleton pattern for the auth provider.
     The first call will create the provider, subsequent calls return the same instance.
+    This is the PREFERRED way to get an auth provider as it ensures only one
+    instance is created and reused across the application, which saves resources
+    and ensures consistent authentication state.
     
     Args:
         service_name: Name of the service using this auth provider
@@ -186,6 +193,9 @@ def get_auth_provider(service_name: str = "service") -> AuthentikAuthProvider:
     global _auth_provider
     
     if _auth_provider is None:
+        logger.info(f"Creating singleton auth provider for {service_name}")
         _auth_provider = create_auth_provider(service_name)
+    else:
+        logger.debug(f"Reusing existing auth provider for {service_name}")
         
     return _auth_provider

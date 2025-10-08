@@ -15,8 +15,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastmcp import FastMCP
 import uvicorn
+import flatdict
 
 from .config import BaseServerConfig
+
 
 # Configure root logger
 logging.basicConfig(
@@ -110,6 +112,48 @@ class BaseMCPServer(abc.ABC):
         self.service = service
         self._mcp_app: Optional[FastMCP] = None
         self._fastapi_app: Optional[FastAPI] = None
+        # Create flattened configuration for easier access
+        try:
+            # Convert config to dict if it's a Pydantic model
+            if hasattr(config, 'model_dump'):  # Pydantic v2
+                config_dict = config.model_dump()
+            elif hasattr(config, 'dict'):  # Pydantic v1
+                config_dict = config.dict()
+            else:
+                # Try a direct conversion or fall back to empty dict
+                config_dict = dict(config) if config else {}
+            
+            self._flat_config = flatdict.FlatDict(config_dict, delimiter='.')
+        except Exception as e:
+            logger.warning(f"Failed to create flattened config: {e}")
+            self._flat_config = flatdict.FlatDict({}, delimiter='.')
+            
+    def get_config(self, key: str, default: Any = None) -> Any:
+        """
+        Get configuration value using flattened dot notation
+        
+        Args:
+            key: Configuration key using dot notation (e.g., 'server.transport')
+            default: Default value to return if key doesn't exist
+            
+        Returns:
+            Configuration value or default
+        """
+        try:
+            return self._flat_config.get(key, default)
+        except Exception:
+            # Fallback to direct attribute access if needed
+            parts = key.split('.')
+            current = self.config
+            
+            try:
+                for part in parts:
+                    if not hasattr(current, part):
+                        return default
+                    current = getattr(current, part)
+                return current
+            except (AttributeError, KeyError):
+                return default
     
     @property
     @abc.abstractmethod
@@ -180,10 +224,18 @@ class BaseMCPServer(abc.ABC):
         Returns:
             Configured FastMCP application with tools registered
         """
-        # Initialize authentication if configured
+        # Initialize authentication if configured and enabled
         auth_provider = None
-        if hasattr(self.config, "transport") and getattr(self.config, "transport") == "http":
+        # Check for transport using the flattened configuration
+        transport = self.get_config("server.transport", self.get_config("transport", "stdio"))
+        auth_enabled = self.get_config("server.auth_enabled", self.get_config("auth_enabled", True))
+        
+        if transport == "http" and auth_enabled:
+            logger.info("Authentication is enabled for HTTP transport")
             auth_provider = self.create_auth_provider()
+        elif transport == "http" and not auth_enabled:
+            logger.warning("Authentication is DISABLED for HTTP transport (AUTH_ENABLED=false)")
+            logger.warning("This is not recommended for production environments")
         
         # Create MCP app
         mcp = FastMCP(
@@ -259,9 +311,9 @@ class BaseMCPServer(abc.ABC):
         """
         Run MCP-only server (no REST API endpoints)
         """
-        # Get host and port from server config, which might be nested
-        host = self.config.server.host if hasattr(self.config, "server") else getattr(self.config, "host", "0.0.0.0")
-        port = self.config.server.port if hasattr(self.config, "server") else getattr(self.config, "port", 3000)
+        # Get host and port using flattened configuration
+        host = self.get_config("server.host", self.get_config("host", "0.0.0.0"))
+        port = self.get_config("server.port", self.get_config("port", 3000))
         
         # Only log if not already logged by a child class
         if not hasattr(self, "_already_logged"):
@@ -302,9 +354,9 @@ class BaseMCPServer(abc.ABC):
         """
         Run FastAPI + MCP server (REST endpoints + MCP protocol)
         """
-        # Get host and port from server config, which might be nested
-        host = self.config.server.host if hasattr(self.config, "server") else getattr(self.config, "host", "0.0.0.0")
-        port = self.config.server.port if hasattr(self.config, "server") else getattr(self.config, "port", 3000)
+        # Get host and port using flattened configuration
+        host = self.get_config("server.host", self.get_config("host", "0.0.0.0"))
+        port = self.get_config("server.port", self.get_config("port", 3000))
         
         # Only log if not already logged by a child class
         if not hasattr(self, "_already_logged"):
@@ -364,14 +416,9 @@ class BaseMCPServer(abc.ABC):
             # Initialize service
             self.service.initialize()
             
-            # Determine server mode
-            # Check if config has a 'server' attribute for nested config
-            if hasattr(self.config, "server"):
-                transport = getattr(self.config.server, "transport", "stdio")
-                mcp_only = getattr(self.config.server, "mcp_only", False)
-            else:
-                transport = getattr(self.config, "transport", "stdio")
-                mcp_only = getattr(self.config, "mcp_only", False)
+            # Determine server mode using flattened configuration
+            transport = self.get_config("server.transport", self.get_config("transport", "stdio"))
+            mcp_only = self.get_config("server.mcp_only", self.get_config("mcp_only", False))
             
             # Start server based on configuration
             if mcp_only:
