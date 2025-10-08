@@ -211,9 +211,38 @@ The MCP integration is implemented using the `FastMCP` framework:
    - HTTP mode: `mcp.http_app()` provides an ASGI application
    - stdio mode: Direct process communication without HTTP overhead
 
-4. **Tool Metadata**:
-   - Rich descriptions and examples help AI assistants understand how to use the tool
-   - Parameter documentation ensures proper requests
+4. **Tool Metadata and Docstrings as AI Instructions**:
+   - Docstrings and comments in tool functions become direct instructions for AI assistants
+   - The LLM receives these docstrings as part of its context when deciding how/when to use the tool
+   - Rich descriptions with examples help the AI understand when the tool is appropriate to use
+   - Parameter documentation guides the AI on how to properly format requests
+   - Example use cases in docstrings help the AI connect user queries to appropriate tool calls
+   - Return type documentation helps the AI understand and present the results effectively
+   
+   ```python
+   @mcp.tool()
+   async def get_hourly_weather(location: str) -> Dict[str, Any]:
+       """
+       Get hourly weather forecast for a location using Open-Meteo API
+       
+       This tool provides comprehensive weather data for AI assistants to help users
+       with weather queries. It requires authentication via Bearer token.
+       
+       Args:
+           location (str): City name or location identifier
+               Examples: "Tallahassee", "New York", "London, UK"
+               
+       Example Usage (in AI conversation):
+           User: "What's the weather like in Tallahassee?"
+           AI calls: get_hourly_weather("Tallahassee")
+           AI responds: "In Tallahassee, it's currently 22.5°C..."
+       """
+       # Implementation
+   ```
+   
+   This docstring directly instructs the AI on when to use this tool, what parameters to pass,
+   and how to interpret and present the results to the user. The detailed examples help the AI
+   recognize when user questions can be answered using this tool.
 
 ## REST API Integration
 
