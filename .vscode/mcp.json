@@ -5,9 +5,9 @@
 			"type": "http",
 			// "url": "http://agentgateway.mixwarecs-home.net/weather-mcp",
 			"url": "http://localhost:3000/mcp",
-			"headers": {
-				"Authorization": "Bearer iaOPJQ29pv9gVVepAA89ZCLvM7eDbc4dbPGRxLl6dtLCFxNRNgU5Ygr0hMlP"
-			}
+			// "headers": {
+			// 	"Authorization": "Bearer iaOPJQ29pv9gVVepAA89ZCLvM7eDbc4dbPGRxLl6dtLCFxNRNgU5Ygr0hMlP"
+			// }
 		},
 		// "weather-specbridge": {
 		// 	"type": "stdio",

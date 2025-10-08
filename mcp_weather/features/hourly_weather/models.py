@@ -7,7 +7,7 @@ Defines request and response models for the hourly weather forecast feature.
 from typing import List
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
-from ...shared.models import Measurement, WindData, Coordinates
+from mcp_weather.shared.models import Measurement, WindData, Coordinates
 
 
 # ============================================================================

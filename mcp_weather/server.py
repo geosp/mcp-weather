@@ -19,13 +19,13 @@ from fastapi.exceptions import RequestValidationError
 from fastmcp import FastMCP
 
 from core.server import BaseMCPServer, BaseService
-from .config import load_config, AppConfig
-from .cache import LocationCache
-from .weather_service import WeatherService
-from .shared.models import ErrorResponse, ErrorDetail
+from mcp_weather.config import load_config, AppConfig
+from mcp_weather.cache import LocationCache
+from mcp_weather.weather_service import WeatherService
+from mcp_weather.shared.models import ErrorResponse, ErrorDetail
 
 # Import features
-from .features import hourly_weather
+from mcp_weather.features import hourly_weather
 
 try:
     from core.auth_mcp import create_auth_provider
@@ -178,7 +178,7 @@ class WeatherMCPServer(BaseMCPServer):
         main_router.include_router(hourly_weather_router)
         
         # Add root and health endpoints
-        from .routes import create_base_router
+        from mcp_weather.routes import create_base_router
         base_router = create_base_router()
         main_router.include_router(base_router)
         

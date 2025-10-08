@@ -11,9 +11,9 @@ from typing import Dict, Any, List, Optional
 from aiohttp import ClientSession, ClientError, ClientTimeout
 from fastapi import HTTPException
 
-from .config import WeatherAPIConfig
-from .cache import LocationCache, LocationData
-from .models import (
+from mcp_weather.config import WeatherAPIConfig
+from mcp_weather.cache import LocationCache, LocationData
+from mcp_weather.models import (
     WeatherResponse,
     CurrentConditions,
     HourlyForecast,

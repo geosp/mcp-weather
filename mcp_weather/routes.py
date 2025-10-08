@@ -11,7 +11,7 @@ from typing import Dict, Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from .shared.models import HealthResponse, ServiceInfo
+from mcp_weather.shared.models import HealthResponse, ServiceInfo
 
 logger = logging.getLogger(__name__)
 

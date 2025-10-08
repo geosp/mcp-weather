@@ -14,9 +14,9 @@ from fastapi.responses import JSONResponse
 # Import auth dependency
 from core.auth_rest import get_token_from_header
 
-from ...weather_service import WeatherService
-from .models import WeatherResponse, WeatherRequest
-from ...shared.models import ErrorResponse
+from mcp_weather.weather_service import WeatherService
+from mcp_weather.features.hourly_weather.models import WeatherResponse, WeatherRequest
+from mcp_weather.shared.models import ErrorResponse
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-from .config import CacheConfig
+from mcp_weather.config import CacheConfig
 
 logger = logging.getLogger(__name__)
 

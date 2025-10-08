@@ -10,8 +10,8 @@ from typing import Dict, Any
 
 from fastmcp import FastMCP
 
-from ...weather_service import WeatherService
-from .models import WeatherResponse, WeatherRequest
+from mcp_weather.weather_service import WeatherService
+from mcp_weather.features.hourly_weather.models import WeatherResponse, WeatherRequest
 
 logger = logging.getLogger(__name__)
 

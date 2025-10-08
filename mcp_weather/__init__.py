@@ -24,13 +24,13 @@ Version: 2.0.0
 License: MIT
 """
 
-from .server import (
+from mcp_weather.server import (
     main,
     create_app,
     WeatherMCPService,
     WeatherMCPServer
 )
-from .config import (
+from mcp_weather.config import (
     get_config,
     load_config,
     AppConfig,
@@ -39,8 +39,8 @@ from .config import (
     WeatherAPIConfig,
     AuthentikConfig
 )
-from .weather_service import WeatherService
-from .cache import LocationCache, LocationData
+from mcp_weather.weather_service import WeatherService
+from mcp_weather.cache import LocationCache, LocationData
 # Import authentication components directly from core
 from core.auth_mcp import (
     AuthentikAuthProvider,
