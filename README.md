@@ -3,35 +3,60 @@
 ## Complete File Organization
 
 ```
+core/
+├── __init__.py              # Package exports
+├── config.py                # Base configuration classes 
+├── auth_mcp.py              # MCP authentication providers
+├── auth_rest.py             # REST API authentication
+├── authentik_client.py      # Client for Authentik API
+└── server.py                # Base server infrastructure
+
 mcp_weather/
 ├── __init__.py              # Package exports and metadata
 ├── config.py                # Configuration management (Pydantic models)
 ├── cache.py                 # Location caching system (JSON file storage)
-├── models.py                # Pydantic request/response models
-├── auth_provider.py         # FastMCP auth adapter (uses core.auth)
 ├── weather_service.py       # Weather API client (Open-Meteo)
-├── routes.py                # FastAPI HTTP routes
-├── tools.py                 # MCP tool definitions
-├── server.py                # Main entry point and app factory
-└── README.md                # Documentation (you'll create this)
+├── routes.py                # Base routes (health check, service info)
+├── server.py                # Weather-specific server implementation
+├── README.md                # Feature-based architecture documentation
+├── features/                # Feature modules
+│   ├── __init__.py          # Feature discovery
+│   ├── README.md            # Feature architecture docs
+│   └── hourly_weather/      # Hourly weather feature
+│       ├── __init__.py      # Feature exports
+│       ├── models.py        # Feature-specific models
+│       ├── routes.py        # Feature REST endpoints
+│       └── tool.py          # Feature MCP tools
+└── shared/                  # Shared components
+    ├── __init__.py          # Package exports
+    ├── README.md            # Shared components docs
+    └── models.py            # Shared models (base classes, errors)
 ```
 
 ## Module Dependencies
 
 ```
-server.py
+core/server.py (base infrastructure)
+└── core/config.py (base configuration)
+
+mcp_weather/server.py (weather-specific server)
+├── core/server.py (inherits BaseMCPServer)
 ├── config.py (configuration loading)
 ├── cache.py (via weather_service)
 ├── weather_service.py (business logic)
-├── auth_provider.py (MCP authentication)
-│   └── core.auth (your existing infrastructure)
-├── routes.py (REST endpoints)
+├── shared/models.py (error models)
+├── core/auth_mcp.py (MCP authentication)
+│   └── core/authentik_client.py
+├── routes.py (base routes)
+│   └── shared/models.py
+├── features/hourly_weather/routes.py (weather endpoints)
 │   ├── weather_service.py
-│   ├── models.py
-│   └── core.auth
-└── tools.py (MCP tools)
+│   ├── shared/models.py (errors)
+│   ├── hourly_weather/models.py (feature models)
+│   └── core/auth_rest.py
+└── features/hourly_weather/tool.py (MCP tool)
     ├── weather_service.py
-    └── models.py
+    └── hourly_weather/models.py
 ```
 
 ## Separation of Concerns
@@ -54,11 +79,11 @@ server.py
 - OpenAPI documentation
 - No business logic
 
-### 4. **auth_provider.py** - Authentication
-- Adapts core.auth for FastMCP
-- No duplication of auth logic
-- Wraps existing AuthentikClient
-- Re-exports FastAPI dependencies
+### 4. **core/auth_mcp.py & core/auth_rest.py** - Authentication
+- Reusable authentication providers
+- Integration with Authentik
+- Authentication for both MCP and REST APIs
+- Support for token validation
 
 ### 5. **weather_service.py** - Business Logic
 - Weather API client
@@ -74,17 +99,23 @@ server.py
 - Uses core.auth for authentication
 - Calls weather_service
 
-### 7. **tools.py** - MCP Protocol
-- MCP tool definitions
-- Tool documentation
-- Calls weather_service
-- Uses auth_provider
+### 7. **tools/** - MCP Protocol Tools
+- Modular tool implementation
+- Automatic discovery and registration
+- Tool documentation and metadata
+- Each tool in its own file for maintainability
 
-### 8. **server.py** - Application Orchestration
-- Application factory
-- Configuration validation
-- Server startup
-- Mode selection (stdio/HTTP/REST+MCP)
+### 8. **core/server.py** - Base Server Infrastructure
+- Abstract base classes for services and servers
+- Common functionality for all server types
+- Support for MCP-only and REST+MCP modes
+- Reusable across projects
+
+### 9. **mcp_weather/server.py** - Weather-Specific Server
+- Weather service implementation
+- Extends base server classes
+- Configuration specific to weather service
+- Entry point for application
 
 ## Key Design Patterns
 
@@ -110,6 +141,28 @@ def create_weather_service(config: AppConfig) -> WeatherService:
 class AuthentikAuthProvider(AuthProvider):
     def __init__(self):
         self.client = get_authentik_client()  # Use existing
+```
+
+### Inheritance and Extension
+```python
+# Extend base server classes
+class WeatherMCPServer(BaseMCPServer):
+    @property
+    def service_title(self) -> str:
+        return "Weather MCP Server"
+        
+    # ... other overridden methods
+```
+
+### Plugin Architecture
+```python
+# Automatic tool discovery and registration
+def register_tools(mcp: FastMCP, weather_service: WeatherService) -> None:
+    # Dynamically discover and load all tool modules
+    for _, module_name, _ in pkgutil.iter_modules([package_path]):
+        module = importlib.import_module(f"{package_name}.{module_name}")
+        if hasattr(module, "register_tool"):
+            module.register_tool(mcp, weather_service)
 ```
 
 ### Singleton Pattern

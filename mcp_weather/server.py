@@ -3,6 +3,9 @@ Weather MCP server implementation using the reusable base server
 
 This module implements a weather-specific server based on the reusable
 base server components in core.server.
+
+Uses a feature-based architecture where each feature has its own
+models, routes, and tool implementations.
 """
 
 import logging
@@ -19,9 +22,10 @@ from core.server import BaseMCPServer, BaseService
 from .config import load_config, AppConfig
 from .cache import LocationCache
 from .weather_service import WeatherService
-from .models import ErrorResponse, ErrorDetail
-from .routes import create_router
-from .tools import register_tools
+from .shared.models import ErrorResponse, ErrorDetail
+
+# Import features
+from .features import hourly_weather
 
 try:
     from core.auth_mcp import create_auth_provider
@@ -78,7 +82,9 @@ class WeatherMCPService(BaseService):
         if self.weather_service is None:
             raise ValueError("Weather service not initialized")
         
-        register_tools(mcp, self.weather_service)
+        # Register tools from feature modules
+        hourly_weather.tool.register_tool(mcp, self.weather_service)
+        
         logger.info("Registered weather tools with MCP server")
 
 
@@ -160,7 +166,19 @@ class WeatherMCPServer(BaseMCPServer):
         cache = LocationCache(weather_service_config.cache)
         weather_service = WeatherService(weather_service_config.weather_api, cache)
         
-        return create_router(weather_service)
+        # Create main router with no prefix
+        main_router = APIRouter()
+        
+        # Create and mount feature routers
+        hourly_weather_router = hourly_weather.routes.create_router(weather_service)
+        main_router.include_router(hourly_weather_router)
+        
+        # Add root and health endpoints
+        from .routes import create_base_router
+        base_router = create_base_router()
+        main_router.include_router(base_router)
+        
+        return main_router
     
     def register_exception_handlers(self, app: FastAPI) -> None:
         """
