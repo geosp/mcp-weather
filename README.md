@@ -6,6 +6,7 @@
 core/
 ├── __init__.py              # Package exports
 ├── config.py                # Base configuration classes 
+├── cache.py                 # Redis caching infrastructure
 ├── auth_mcp.py              # MCP authentication providers
 ├── auth_rest.py             # REST API authentication
 ├── authentik_client.py      # Client for Authentik API
@@ -14,7 +15,6 @@ core/
 mcp_weather/
 ├── __init__.py              # Package exports and metadata
 ├── config.py                # Configuration management (Pydantic models)
-├── cache.py                 # Location caching system (JSON file storage)
 ├── weather_service.py       # Weather API client (Open-Meteo)
 ├── routes.py                # Base routes (health check, service info)
 ├── server.py                # Weather-specific server implementation
@@ -42,7 +42,7 @@ core/server.py (base infrastructure)
 mcp_weather/server.py (weather-specific server)
 ├── core/server.py (inherits BaseMCPServer)
 ├── config.py (configuration loading)
-├── cache.py (via weather_service)
+├── core/cache.py (Redis caching via weather_service)
 ├── weather_service.py (business logic)
 ├── shared/models.py (error models)
 ├── core/auth_mcp.py (MCP authentication)
@@ -67,10 +67,12 @@ mcp_weather/server.py (weather-specific server)
 - Provides typed config objects
 - No business logic
 
-### 2. **cache.py** - Data Persistence
-- Location coordinate caching
-- JSON file operations
-- Expiry management
+### 2. **core/cache.py** - Data Persistence
+- Redis-based location coordinate caching
+- JSON serialization/deserialization
+- Configurable TTL
+- Error handling with graceful fallback
+- Async-first API
 - Independent of weather logic
 
 ### 3. **models.py** - Data Models
@@ -246,14 +248,33 @@ print(config.cache.cache_dir)
 
 ### Test cache.py
 ```python
-from mcp_weather.cache import LocationCache, LocationData
-from mcp_weather.config import CacheConfig
+import asyncio
+from core.cache import RedisCacheClient
+from core.config import RedisCacheConfig
 
-cache = LocationCache(CacheConfig())
-data = LocationData(30.4383, -84.2807, "Tallahassee", "US")
-cache.set("tallahassee", data)
-result = cache.get("tallahassee")
-print(result.name, result.latitude, result.longitude)
+async def test():
+    cache_config = RedisCacheConfig(
+        host="localhost",
+        port=6379,
+        db=0,
+        namespace="weather",
+        ttl=28800  # 8 hours in seconds
+    )
+    cache = RedisCacheClient(cache_config)
+    
+    # Store location data
+    test_data = {"latitude": 30.4383, "longitude": -84.2807, "name": "Tallahassee", "country": "US"}
+    await cache.set("tallahassee", test_data)
+    
+    # Retrieve location data
+    result = await cache.get("tallahassee")
+    if result:
+        print(result["name"], result["latitude"], result["longitude"])
+    
+    # Clean up
+    await cache.delete("tallahassee")
+
+asyncio.run(test())
 ```
 
 ### Test weather_service.py
@@ -292,8 +313,12 @@ print(response.json())
 | `MCP_AUTH_ENABLED` | Enable authentication (true/false) | `true` | No |
 | `AUTHENTIK_API_URL` | Authentik API URL | - | Yes (HTTP mode with MCP_AUTH_ENABLED=true) |
 | `AUTHENTIK_API_TOKEN` | Authentik API token | - | Yes (HTTP mode with MCP_AUTH_ENABLED=true) |
-| `CACHE_DIR` | Cache directory path | `~/.cache/weather` | No |
-| `CACHE_EXPIRY_DAYS` | Cache expiry (days) | `30` | No |
+| `MCP_REDIS_HOST` | Redis server host | `localhost` | No |
+| `MCP_REDIS_PORT` | Redis server port | `6379` | No |
+| `MCP_REDIS_DB` | Redis database number | `0` | No |
+| `MCP_REDIS_PASSWORD` | Redis password | `` | No |
+| `MCP_REDIS_NAMESPACE` | Redis key namespace | `weather` | No |
+| `MCP_REDIS_TTL` | Cache TTL in seconds | `28800` (8 hours) | No |
 | `WEATHER_API_URL` | Open-Meteo weather URL | (default) | No |
 | `WEATHER_GEOCODING_URL` | Open-Meteo geocoding URL | (default) | No |
 

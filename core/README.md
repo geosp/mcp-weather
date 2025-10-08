@@ -1,4 +1,3 @@
-````markdown
 # Core Infrastructure
 
 This directory contains reusable infrastructure components that can be shared across multiple projects.
@@ -25,6 +24,14 @@ This directory contains reusable infrastructure components that can be shared ac
   - Authentication settings
   - Cache settings
   - Server settings
+  - Redis settings
+
+### 4. Caching
+
+- **cache.py**: Redis-based caching infrastructure:
+  - `RedisCacheClient`: Async Redis client with error handling
+  - `EnhancedJsonSerializer`: Custom JSON serializer for complex objects
+  - Comprehensive error handling for Redis connection issues
 
 ## Usage
 
@@ -59,6 +66,46 @@ class MyServerConfig(BaseServerConfig):
         config = super().from_env(env_prefix="MY_APP_")
         config.debug_mode = os.getenv("MY_APP_DEBUG", "false").lower() == "true"
         return config
+```
+
+### Redis Cache
+
+```python
+# Use the Redis cache client
+import asyncio
+from core.cache import RedisCacheClient
+from core.config import RedisCacheConfig
+
+async def cache_example():
+    # Create cache configuration
+    cache_config = RedisCacheConfig(
+        host="redis.example.com",
+        port=6379,
+        db=0,
+        password="optional_password",
+        namespace="my-service",
+        ttl=3600  # 1 hour TTL in seconds
+    )
+    
+    # Initialize cache client
+    cache_client = RedisCacheClient(cache_config)
+    
+    # Store data
+    await cache_client.set("user:123", {"name": "John", "email": "john@example.com"})
+    
+    # Retrieve data with custom deserializer
+    class User:
+        def __init__(self, name, email):
+            self.name = name
+            self.email = email
+    
+    def user_deserializer(data):
+        return User(data["name"], data["email"])
+    
+    user = await cache_client.get("user:123", user_deserializer)
+    
+    # Delete data
+    await cache_client.delete("user:123")
 ```
 
 ### Server Implementation
