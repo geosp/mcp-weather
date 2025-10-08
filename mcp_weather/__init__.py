@@ -40,7 +40,8 @@ from mcp_weather.config import (
     AuthentikConfig
 )
 from mcp_weather.weather_service import WeatherService
-from mcp_weather.cache import LocationCache, LocationData
+from mcp_weather.models import LocationData
+from core.cache import RedisCacheClient
 # Import authentication components directly from core
 from core.auth_mcp import (
     AuthentikAuthProvider,
@@ -68,7 +69,7 @@ __all__ = [
     
     # Core services
     "WeatherService",
-    "LocationCache",
+    "RedisCacheClient",
     "LocationData",
     
     # Authentication

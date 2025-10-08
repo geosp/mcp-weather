@@ -14,6 +14,7 @@ from core.config import (
     AuthentikConfig,
     BaseCacheConfig,
     BaseServerConfig,
+    RedisCacheConfig,
     load_dotenv
 )
 
@@ -113,6 +114,7 @@ class AppConfig(BaseModel):
     """
     server: ServerConfig
     cache: CacheConfig
+    redis_cache: RedisCacheConfig
     weather_api: WeatherAPIConfig
     authentik: Optional[AuthentikConfig] = None
     
@@ -121,6 +123,7 @@ class AppConfig(BaseModel):
         """Load complete configuration from environment variables"""
         server = ServerConfig.from_env()
         cache = CacheConfig.from_env()
+        redis_cache = RedisCacheConfig.from_env(env_prefix="MCP_")
         weather_api = WeatherAPIConfig.from_env()
         
         # Only load Authentik config if using HTTP transport
@@ -131,6 +134,7 @@ class AppConfig(BaseModel):
         return cls(
             server=server,
             cache=cache,
+            redis_cache=redis_cache,
             weather_api=weather_api,
             authentik=authentik
         )

@@ -6,14 +6,16 @@ Provides clean abstraction over the Open-Meteo API.
 """
 
 import logging
+import hashlib
 from typing import Dict, Any, List, Optional
 
 from aiohttp import ClientSession, ClientError, ClientTimeout
 from fastapi import HTTPException
 
+from core.cache import RedisCacheClient
 from mcp_weather.config import WeatherAPIConfig
-from mcp_weather.cache import LocationCache, LocationData
 from mcp_weather.models import (
+    LocationData,
     WeatherResponse,
     CurrentConditions,
     HourlyForecast,
@@ -85,17 +87,17 @@ class WeatherService:
         "W", "WNW", "NW", "NNW"
     ]
     
-    def __init__(self, api_config: WeatherAPIConfig, cache: LocationCache):
+    def __init__(self, api_config: WeatherAPIConfig, cache_client: RedisCacheClient):
         """
         Initialize weather service
         
         Args:
             api_config: Weather API configuration with endpoint URLs
-            cache: Location cache for storing geocoded coordinates
+            cache_client: Redis cache client for storing geocoded coordinates
         """
         self.geocoding_url = api_config.geocoding_url
         self.weather_url = api_config.weather_url
-        self.cache = cache
+        self.cache_client = cache_client
         
         # HTTP client timeout configuration
         self.timeout = ClientTimeout(total=30, connect=10)
@@ -559,7 +561,7 @@ class WeatherService:
         logger.info(f"Fetching weather for: {location}")
         
         # Check cache for coordinates
-        cached_location = self.cache.get(location)
+        cached_location = await self.cache_client.get(location, LocationData.from_dict)
         
         async with ClientSession() as session:
             # Get location coordinates (from cache or API)
@@ -569,7 +571,8 @@ class WeatherService:
             else:
                 logger.info(f"Cache miss, geocoding {location}")
                 location_data = await self._geocode_location(session, location)
-                self.cache.set(location, location_data)
+                # Cache the result as a dictionary
+                await self.cache_client.set(location, location_data.to_dict())
             
             # Fetch weather data
             weather_data = await self._fetch_weather(

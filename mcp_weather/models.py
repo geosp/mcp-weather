@@ -10,6 +10,60 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
+class LocationData:
+    """
+    Represents location data with coordinates and metadata
+    
+    Used for geocoding results and caching.
+    """
+    
+    def __init__(
+        self,
+        latitude: float,
+        longitude: float,
+        name: str,
+        country: str = "",
+        timezone: str = "auto",
+        cached_at: Optional[datetime] = None
+    ):
+        self.latitude = latitude
+        self.longitude = longitude
+        self.name = name
+        self.country = country
+        self.timezone = timezone
+        self.cached_at = cached_at or datetime.now()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "name": self.name,
+            "country": self.country,
+            "timezone": self.timezone,
+            "cached_at": self.cached_at.isoformat()
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "LocationData":
+        """Create from dictionary (JSON deserialization)"""
+        cached_at = None
+        if "cached_at" in data:
+            try:
+                cached_at = datetime.fromisoformat(data["cached_at"])
+            except (ValueError, TypeError):
+                cached_at = datetime.now()
+        
+        return cls(
+            latitude=data["latitude"],
+            longitude=data["longitude"],
+            name=data["name"],
+            country=data.get("country", ""),
+            timezone=data.get("timezone", "auto"),
+            cached_at=cached_at
+        )
+
+
 # ============================================================================
 # Request Models
 # ============================================================================

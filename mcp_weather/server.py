@@ -20,7 +20,7 @@ from fastmcp import FastMCP
 
 from core.server import BaseMCPServer, BaseService
 from mcp_weather.config import load_config, AppConfig
-from mcp_weather.cache import LocationCache
+from core.cache import RedisCacheClient
 from mcp_weather.weather_service import WeatherService
 from mcp_weather.shared.models import ErrorResponse, ErrorDetail
 
@@ -70,10 +70,10 @@ class WeatherMCPService(BaseService):
     
     def initialize(self) -> None:
         """Initialize the weather service and its dependencies"""
-        # Create the location cache and weather service directly
-        location_cache = LocationCache(self.config.cache)
-        self.weather_service = WeatherService(self.config.weather_api, location_cache)
-        logger.info("WeatherMCPService initialized with enhanced location handling")
+        # Create the Redis cache client and weather service
+        cache_client = RedisCacheClient(self.config.redis_cache)
+        self.weather_service = WeatherService(self.config.weather_api, cache_client)
+        logger.info("WeatherMCPService initialized with Redis cache for location handling")
     
     def get_service_name(self) -> str:
         """Get the name of this service"""
@@ -165,10 +165,10 @@ class WeatherMCPServer(BaseMCPServer):
         # Create a new instance of WeatherService for REST routes
         # to avoid potential concurrency issues with the MCP service
         weather_service_config = AppConfig.from_env()
-        location_cache = LocationCache(weather_service_config.cache)
+        cache_client = RedisCacheClient(weather_service_config.redis_cache)
         weather_service = WeatherService(
             weather_service_config.weather_api,
-            location_cache
+            cache_client
         )
         
         # Create main router with no prefix

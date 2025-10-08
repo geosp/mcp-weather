@@ -90,6 +90,78 @@ class BaseCacheConfig(BaseModel):
         return cls(**kwargs)
 
 
+class RedisCacheConfig(BaseModel):
+    """
+    Redis cache configuration
+    
+    Configuration for Redis-based caching with aiocache.
+    Supports both local and remote Redis servers.
+    """
+    host: str = Field(
+        default="redis.mixwarecs-home.net", 
+        description="Redis server hostname or IP address"
+    )
+    port: int = Field(
+        default=6379,
+        ge=1,
+        le=65535,
+        description="Redis server port"
+    )
+    db: int = Field(
+        default=0,
+        ge=0,
+        le=15,
+        description="Redis database index (0-15)"
+    )
+    password: Optional[str] = Field(
+        default=None,
+        description="Redis password (optional)"
+    )
+    namespace: str = Field(
+        default="weather-cache",
+        description="Namespace prefix for Redis keys"
+    )
+    ttl: int = Field(
+        default=28800,  # 8 hours in seconds
+        ge=60,          # Minimum 1 minute
+        description="Default TTL for cached values in seconds"
+    )
+
+    @classmethod
+    def from_env(cls: Type[T], env_prefix: str = "") -> T:
+        """
+        Load Redis configuration from environment variables
+        
+        Args:
+            env_prefix: Optional prefix for environment variables
+            
+        Returns:
+            Configured Redis cache instance
+        """
+        host = os.getenv(f"{env_prefix}REDIS_HOST")
+        port = os.getenv(f"{env_prefix}REDIS_PORT")
+        db = os.getenv(f"{env_prefix}REDIS_DB")
+        password = os.getenv(f"{env_prefix}REDIS_PASSWORD")
+        namespace = os.getenv(f"{env_prefix}REDIS_NAMESPACE")
+        ttl = os.getenv(f"{env_prefix}REDIS_TTL")
+        
+        kwargs: Dict[str, Any] = {}
+        if host:
+            kwargs["host"] = host
+        if port:
+            kwargs["port"] = int(port)
+        if db:
+            kwargs["db"] = int(db)
+        if password:
+            kwargs["password"] = password
+        if namespace:
+            kwargs["namespace"] = namespace
+        if ttl:
+            kwargs["ttl"] = int(ttl)
+        
+        return cls(**kwargs)
+
+
 class BaseServerConfig(BaseModel):
     """
     Base HTTP server configuration

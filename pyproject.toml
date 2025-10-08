@@ -9,7 +9,9 @@ dependencies = [
     "aiohttp",
     "uvicorn",
     "fastapi",   # <-- add this
-    "fastmcp>=2.0.0"
+    "fastmcp>=2.0.0",
+    "aiocache>=0.12.0",  # For async caching
+    "redis>=5.0.0"       # Redis client for aiocache
 ]
 
 [build-system]
