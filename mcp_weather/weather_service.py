@@ -156,6 +156,64 @@ class WeatherService:
         idx = int((degrees + 11.25) / 22.5) % 16
         return self.WIND_DIRECTIONS[idx]
     
+    # Dictionary of U.S. state abbreviations to full names
+    US_STATES = {
+        "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", 
+        "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+        "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", 
+        "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", 
+        "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland", 
+        "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", 
+        "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", 
+        "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", 
+        "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", 
+        "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", 
+        "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", 
+        "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", 
+        "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia"
+    }
+
+    def _parse_location(self, location: str) -> tuple[str, Optional[str], Optional[str]]:
+        """
+        Parse a location string into city, state/province, and country components
+        
+        Args:
+            location: Location string (e.g., "Vancouver, Canada" or "Cleveland, GA, USA")
+            
+        Returns:
+            Tuple of (city, state, country), where state and country may be None
+        """
+        parts = [p.strip() for p in location.split(',')]
+        
+        city = parts[0]
+        state = None
+        country = None
+        
+        if len(parts) == 2:
+            # Format: "City, Country" or "City, State"
+            second_part = parts[1]
+            
+            # Check if second part is a U.S. state abbreviation
+            if second_part.upper() in self.US_STATES:
+                state = second_part
+                country = "United States"
+            else:
+                country = second_part
+                
+        elif len(parts) >= 3:
+            # Format: "City, State, Country"
+            state = parts[1]
+            country = parts[2]
+            
+            # If we have more than 3 parts, combine the rest into the country
+            if len(parts) > 3:
+                country = ", ".join(parts[2:])
+                
+        # Log the parsed components for debugging
+        logger.info(f"Parsed location '{location}' into city='{city}', state='{state}', country='{country}'")
+        
+        return city, state, country
+
     async def _geocode_location(
         self, 
         session: ClientSession, 
@@ -174,12 +232,20 @@ class WeatherService:
         Raises:
             HTTPException: 404 if location not found, 500 for API errors
         """
+        # Parse location components for better geocoding accuracy
+        city, state, country = self._parse_location(location)
+        
+        # Set up basic parameters
         params = {
-            "name": location,
-            "count": 1,
+            # For US locations with state, use just the city name and filter by state later
+            # For other locations with country, use the full location string
+            "name": city if state else (location if country else city),
+            "count": 10,  # Request more results to filter
             "language": "en",
             "format": "json"
         }
+        
+        logger.info(f"Geocoding query: {params['name']}")
         
         try:
             async with session.get(
@@ -208,7 +274,69 @@ class WeatherService:
                         detail=f"Location not found: {location}"
                     )
                 
-                result = results[0]
+                # Log raw API response for debugging
+                logger.debug(f"Geocoding API returned {len(results)} results")
+                
+                # Get parsed components
+                city, state, country = self._parse_location(location)
+                
+                # Filter results to prioritize exact matches
+                filtered_results = []
+                
+                # Debug log all results for better debugging
+                for i, r in enumerate(results):
+                    admin1 = r.get("admin1", "")  # State/Province
+                    logger.info(f"Result {i+1}: {r.get('name')}, {admin1}, {r.get('country')} ({r.get('latitude')}, {r.get('longitude')})")
+                
+                # Case 1: US location with state specified
+                if state and country and "united states" in country.lower():
+                    logger.info(f"Filtering results for US city='{city}', state='{state}'")
+                    state_full = self.US_STATES.get(state.upper(), state)
+                    
+                    # First priority: Exact city name + exact state match
+                    for r in results:
+                        r_city = r.get("name", "").lower()
+                        r_admin1 = r.get("admin1", "").lower()  # State
+                        r_country = r.get("country", "").lower()
+                        
+                        if (r_city == city.lower() and 
+                            "united states" in r_country.lower() and
+                            (state_full.lower() in r_admin1 or state.lower() in r_admin1)):
+                            logger.info(f"Found exact US state match: {r.get('name')}, {r.get('admin1')}")
+                            filtered_results.append(r)
+                            break  # Use the first exact match
+                
+                # Case 2: International location with country specified
+                elif country:
+                    logger.info(f"Filtering results for international city='{city}', country='{country}'")
+                    
+                    # Look for exact city+country match first (case-insensitive)
+                    for r in results:
+                        r_country = r.get("country", "").lower()
+                        r_city = r.get("name", "").lower()
+                        
+                        # Direct match for both city and country
+                        if (r_city == city.lower() and country.lower() in r_country):
+                            logger.info(f"Found exact international match: {r.get('name')}, {r.get('country')}")
+                            filtered_results.append(r)
+                    
+                    # If no exact matches, try country matches with similar city names
+                    if not filtered_results:
+                        for r in results:
+                            r_country = r.get("country", "").lower()
+                            
+                            if country.lower() in r_country:
+                                logger.info(f"Found country match: {r.get('name')}, {r.get('country')}")
+                                filtered_results.append(r)
+                
+                # If we found matches, use the first filtered result
+                # Otherwise use the first API result
+                if filtered_results:
+                    logger.info(f"Using filtered result: {filtered_results[0].get('name')}, {filtered_results[0].get('country')}")
+                    result = filtered_results[0]
+                else:
+                    logger.info(f"No filtered matches, using first result: {results[0].get('name')}, {results[0].get('country')}")
+                    result = results[0]
                 
                 location_data = LocationData(
                     latitude=result["latitude"],

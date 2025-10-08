@@ -37,8 +37,8 @@ tool_metadata = {
         },
         {
             "description": "Get weather with country specification",
-            "call": "get_hourly_weather('Paris, France')",
-            "use_case": "User asks 'How's the weather in Paris?'"
+            "call": "get_hourly_weather('Vancouver, Canada')",
+            "use_case": "User asks 'How's the weather in Vancouver, Canada?'"
         },
         {
             "description": "Get weather for trip planning",
@@ -75,6 +75,7 @@ def register_tool(mcp: FastMCP, weather_service: WeatherService) -> None:
         - "Will it rain in Tokyo today?"
         - "What's the temperature in New York right now?"
         - "Should I bring an umbrella in London?"
+        - "How cold is it in Vancouver, Canada?"
         
         Features:
             - Current temperature, humidity, wind, and precipitation
@@ -96,8 +97,8 @@ def register_tool(mcp: FastMCP, weather_service: WeatherService) -> None:
         
         Args:
             location (str): City name or location identifier
-                Examples: "Tallahassee", "New York", "London", "Tokyo", "Paris, France"
-                Can be just city name or "City, Country" format
+                Examples: "Tallahassee", "New York", "London, UK", "Tokyo, Japan", "Vancouver, Canada"
+                Can be just city name or "City, Country" format (recommended for cities with same name)
                 
         Returns:
             Dict[str, Any]: Structured weather data containing:

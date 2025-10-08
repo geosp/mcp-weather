@@ -220,6 +220,19 @@ gunicorn mcp_weather.server:create_app \
     --bind 0.0.0.0:3000
 ```
 
+### 6. Test MCP functionality
+```bash
+# Run test client with authentication token
+./test-mcp.sh YOUR_AUTHENTIK_TOKEN
+
+# Test with specific location (supports city, country format)
+./test-mcp.sh YOUR_AUTHENTIK_TOKEN "Vancouver, Canada"
+
+# Examples with complex locations
+./test-mcp.sh YOUR_TOKEN "Tallahassee, FL, USA"
+./test-mcp.sh YOUR_TOKEN "Paris, France"
+```
+
 ## Testing Each Module
 
 ### Test config.py

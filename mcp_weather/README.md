@@ -34,6 +34,18 @@ Each feature is self-contained with its own:
 - Routes: REST API endpoints
 - Tools: MCP tool implementations
 
+### Enhanced Location Handling
+
+The service includes built-in enhanced location handling capabilities:
+- **City, Country format support**: Better handling of locations like "Paris, France" vs "Paris, Texas"
+- **State/Province handling**: Support for formats like "Cleveland, GA" to distinguish from "Cleveland, OH"
+- **Special character support**: Properly handles names with accents like "São Paulo" or "München"
+- **Smart caching**: Prevents cache collisions between similarly named cities in different regions
+
+This functionality is built into the core components:
+- `LocationCache` now includes enhanced parsing for city, state, and country components
+- `WeatherService` leverages this parsing for better geocoding results
+
 ### Shared Components
 
 Common code used across features:

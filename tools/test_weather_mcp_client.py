@@ -14,29 +14,50 @@ Usage:
     uv pip install -e .
     
     # Run with the convenience script (recommended):
-    ./run-test.sh YOUR_AUTHENTIK_TOKEN
+    ./test-mcp.sh YOUR_AUTHENTIK_TOKEN [LOCATION]
     
     # Or run directly with the token as a parameter:
-    AUTHENTIK_TOKEN="your-token-here" uv run python tools/test_mcp_client.py
+    AUTHENTIK_TOKEN="your-token-here" python tools/test_weather_mcp_client.py [LOCATION]
+    
+    # Examples:
+    ./test-mcp.sh YOUR_TOKEN "Tallahassee, FL, USA"
+    ./test-mcp.sh YOUR_TOKEN "Vancouver, Canada"
+    ./test-mcp.sh YOUR_TOKEN "Paris, France"
 """
 
 import os
 import sys
 import asyncio
 import json
+import argparse
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
 
-async def test_weather_mcp():
-    """Test the Weather MCP Server"""
+async def test_weather_mcp(location: str = None):
+    """
+    Test the Weather MCP Server
+    
+    Args:
+        location: Optional location to test (default: "Tallahassee, FL, USA")
+    """
     
     # Get authentication token
     auth_token = os.getenv("AUTHENTIK_TOKEN")
+    if not auth_token and len(sys.argv) > 1:
+        auth_token = sys.argv[1]
+    
     if not auth_token:
         print("❌ ERROR: AUTHENTIK_TOKEN environment variable not set")
         print("\nSet your token: export AUTHENTIK_TOKEN='your-token-here'")
         return False
+        
+    # Default location if none specified
+    if not location and len(sys.argv) > 2:
+        location = sys.argv[2]
+        
+    if not location:
+        location = "Tallahassee, FL, USA"
     
     print("🧪 Testing Weather MCP Server")
     print("=" * 70)
@@ -73,11 +94,10 @@ async def test_weather_mcp():
             print("🌤️  Testing Weather Tool")
             print("-" * 70)
             
-            test_location = "Tallahassee"
-            print(f"📍 Location: {test_location}")
+            print(f"📍 Location: {location}")
             
             result = await asyncio.wait_for(
-                client.call_tool('get_hourly_weather', {'location': test_location}),
+                client.call_tool('get_hourly_weather', {'location': location}),
                 timeout=15.0
             )
             
@@ -122,5 +142,16 @@ async def test_weather_mcp():
 
 
 if __name__ == "__main__":
-    success = asyncio.run(test_weather_mcp())
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Test Weather MCP Server")
+    parser.add_argument("token", nargs="?", help="Authentik token")
+    parser.add_argument("location", nargs="?", help="Location to test")
+    args = parser.parse_args()
+    
+    # Set token from args if provided
+    if args.token:
+        os.environ["AUTHENTIK_TOKEN"] = args.token
+    
+    # Run the test
+    success = asyncio.run(test_weather_mcp(args.location))
     sys.exit(0 if success else 1)

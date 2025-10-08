@@ -3,13 +3,20 @@ Location caching system for Weather MCP Server
 
 Provides persistent caching of geocoded location coordinates to reduce API calls.
 Uses JSON file storage with expiry mechanism.
+
+Enhanced Features:
+- Smart city-country parsing (e.g., "Paris, France" vs "Paris, TX")
+- State/province handling (e.g., "Cleveland, GA" vs "Cleveland, OH")
+- Handling of special characters in location names
+- Prevention of cache collisions between similarly named cities
 """
 
 import json
+import re
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 from .config import CacheConfig
 
@@ -85,12 +92,31 @@ class LocationCache:
         - Atomic file operations for data safety
         - Automatic cache directory creation
         - Graceful error handling for corrupted cache files
+        - Enhanced location handling for "City, Country" and "City, State, Country" formats
+        - Support for U.S. state abbreviations
     
     Thread Safety:
         - Not thread-safe by default
         - File operations use atomic rename for write safety
         - Consider adding file locking for multi-process scenarios
     """
+    
+    # US state abbreviations for reference
+    US_STATES = {
+        "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", 
+        "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+        "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", 
+        "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", 
+        "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland", 
+        "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", 
+        "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", 
+        "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", 
+        "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", 
+        "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", 
+        "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", 
+        "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", 
+        "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia"
+    }
     
     def __init__(self, config: CacheConfig):
         """
@@ -118,13 +144,68 @@ class LocationCache:
         """
         Normalize location name for consistent cache lookups
         
+        Handles various formats:
+        - "Vancouver, Canada" -> "vancouver_canada"
+        - "New York City, NY, USA" -> "newyorkcity_ny_usa"
+        
         Args:
             location: Location name to normalize
             
         Returns:
-            Normalized location key (lowercase, stripped)
+            Normalized location key
         """
-        return location.strip().lower()
+        # Strip and lowercase
+        key = location.strip().lower()
+        
+        # Replace commas and multiple spaces with underscores
+        key = re.sub(r'[,\s]+', '_', key)
+        
+        # Remove any trailing or duplicate underscores
+        key = re.sub(r'_+', '_', key)
+        key = re.sub(r'_$', '', key)
+        
+        # Log for debugging
+        logger.debug(f"Normalized cache key: '{location}' -> '{key}'")
+        
+        return key
+        
+    def _parse_location(self, location: str) -> Tuple[str, Optional[str], Optional[str]]:
+        """
+        Parse a location string into city, state/province, and country components
+        
+        Args:
+            location: Location string (e.g., "Vancouver, Canada" or "Cleveland, GA, USA")
+            
+        Returns:
+            Tuple of (city, state, country), where state and country may be None
+        """
+        parts = [p.strip() for p in location.split(',')]
+        
+        city = parts[0]
+        state = None
+        country = None
+        
+        if len(parts) == 2:
+            # Format: "City, Country" or "City, State"
+            second_part = parts[1]
+            
+            # Check if second part is a U.S. state abbreviation
+            if second_part.upper() in self.US_STATES:
+                state = second_part
+                country = "United States"
+            else:
+                country = second_part
+                
+        elif len(parts) >= 3:
+            # Format: "City, State, Country"
+            state = parts[1]
+            country = parts[2]
+            
+            # If we have more than 3 parts, combine the rest into the country
+            if len(parts) > 3:
+                country = ", ".join(parts[2:])
+        
+        return city, state, country
     
     def _load_cache(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -179,12 +260,53 @@ class LocationCache:
         """
         Get cached location data if it exists and hasn't expired
         
+        For locations with "City, Country" format or "City, State, Country" format:
+        - Only return exact matches for the full normalized key
+        - DO NOT return city-only matches (we want exact state/country matching)
+        
+        For city-only locations:
+        - Return city matches as normal
+        
         Args:
             location: Location name to look up
             
         Returns:
             LocationData if found and valid, None otherwise
         """
+        # Parse location components
+        city, state, country = self._parse_location(location)
+        
+        # For locations with state or country, we need exact matching
+        if state or country:
+            logger.info(f"Looking for exact cache match for '{location}' with state or country")
+            cache_key = self._normalize_key(location)
+            cache = self._load_cache()
+            
+            entry_dict = cache.get(cache_key)
+            if not entry_dict:
+                # Don't fall back to city-only for locations with state or country
+                # This prevents Santiago, Chile from using cached Santiago, Dominican Republic
+                # And prevents Cleveland, GA from using Cleveland, OH
+                logger.debug(f"No exact cache match for '{location}' - not using city-only fallback")
+                return None
+            
+            try:
+                # Parse cached entry
+                location_data = LocationData.from_dict(entry_dict)
+                
+                # Check expiry
+                if location_data.is_expired(self.expiry_days):
+                    logger.info(f"Cache expired for: {location} (age: {datetime.now() - location_data.cached_at})")
+                    return None
+                
+                logger.info(f"Found exact cache match for '{location}'")
+                return location_data
+            except (KeyError, ValueError, TypeError) as e:
+                logger.warning(f"Invalid cache entry for {location}: {e}")
+                return None
+        
+        # For city-only format, try exact match
+        logger.info(f"Looking for cache match for city-only location '{location}'")
         cache_key = self._normalize_key(location)
         cache = self._load_cache()
         

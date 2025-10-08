@@ -19,10 +19,10 @@ class WeatherRequest(BaseModel):
     
     location: str = Field(
         ...,
-        description="City name or location (e.g., 'Tallahassee', 'New York', 'London')",
+        description="City name or 'City, Country' format (e.g., 'Tallahassee', 'Vancouver, Canada')",
         min_length=1,
         max_length=100,
-        examples=["Tallahassee", "New York", "London", "Tokyo"]
+        examples=["Tallahassee", "New York", "London, UK", "Vancouver, Canada", "Tokyo, Japan"]
     )
     
     @field_validator("location")
@@ -37,7 +37,7 @@ class WeatherRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "location": "Tallahassee"
+                "location": "Vancouver, Canada"
             }
         }
     )

@@ -69,9 +69,10 @@ class WeatherMCPService(BaseService):
     
     def initialize(self) -> None:
         """Initialize the weather service and its dependencies"""
-        cache = LocationCache(self.config.cache)
-        self.weather_service = WeatherService(self.config.weather_api, cache)
-        logger.info("WeatherMCPService initialized")
+        # Create the location cache and weather service directly
+        location_cache = LocationCache(self.config.cache)
+        self.weather_service = WeatherService(self.config.weather_api, location_cache)
+        logger.info("WeatherMCPService initialized with enhanced location handling")
     
     def get_service_name(self) -> str:
         """Get the name of this service"""
@@ -163,8 +164,11 @@ class WeatherMCPServer(BaseMCPServer):
         # Create a new instance of WeatherService for REST routes
         # to avoid potential concurrency issues with the MCP service
         weather_service_config = AppConfig.from_env()
-        cache = LocationCache(weather_service_config.cache)
-        weather_service = WeatherService(weather_service_config.weather_api, cache)
+        location_cache = LocationCache(weather_service_config.cache)
+        weather_service = WeatherService(
+            weather_service_config.weather_api,
+            location_cache
+        )
         
         # Create main router with no prefix
         main_router = APIRouter()
