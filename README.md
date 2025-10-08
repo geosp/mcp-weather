@@ -65,6 +65,44 @@ The Weather MCP service exposes weather forecast capabilities to AI assistants t
 
 Our implementation supports both stdio and HTTP transports, and takes a primarily stateless approach where each request is self-contained. We do use Redis caching for performance optimization, but this is transparent to the client and doesn't affect the protocol's stateless nature.
 
+### Framework Integration: FastMCP and FastAPI
+
+This project leverages two powerful frameworks that work together to provide a robust MCP implementation:
+
+**FastMCP:**
+- **Purpose**: Implements the Model Context Protocol specification in Python
+- **Role in Our Project**: 
+  - Provides the core MCP server infrastructure
+  - Handles tool registration and invocation
+  - Manages request/response serialization
+  - Supports both stdio and HTTP transports
+  - Processes authentication
+- **Advantages**:
+  - Reduces boilerplate code for MCP implementation
+  - Ensures protocol compliance
+  - Handles complex transport details transparently
+
+**FastAPI:**
+- **Purpose**: Modern, high-performance web framework for building APIs
+- **Role in Our Project**:
+  - Provides the HTTP server when operating in HTTP mode
+  - Enables RESTful API endpoints alongside MCP
+  - Handles request validation with Pydantic models
+  - Manages OpenAPI documentation
+  - Supports async operations for better performance
+- **Advantages**:
+  - Excellent performance characteristics
+  - Built-in validation and documentation
+  - First-class async/await support
+  - Type safety with Python type annotations
+
+These frameworks are integrated in the core server implementation, which follows a layered architecture:
+
+1. **FastAPI** handles HTTP routing and REST API endpoints
+2. **FastMCP** processes MCP protocol requests and manages tools
+3. Our custom **WeatherService** provides the business logic
+4. **RedisCacheClient** manages caching for improved performance
+
 ### Integration with GitHub Copilot
 
 When a user asks GitHub Copilot about the weather in a location:
@@ -116,6 +154,121 @@ This configuration allows:
 3. **SpecBridge Connection (Optional)**
    - Connect through SpecBridge for schema-based validation
    - Useful for testing against the API specification
+
+# Understanding the MCP Weather Service
+
+## What is MCP?
+
+The Model Context Protocol (MCP) is a specialized protocol that allows AI assistants (like GitHub Copilot) to interact with external services. In this project, MCP enables Copilot to access real-time weather data when users ask weather-related questions.
+
+## Architecture Overview
+
+This project implements a weather service with two key interfaces:
+1. **MCP API**: For AI assistant interactions
+2. **REST API**: For standard web/application access
+
+### Key Components
+
+1. **Server Layer (server.py)**:
+   - Extends `BaseMCPServer` from the core module
+   - Provides both HTTP and stdio transports
+   - Configures authentication with Authentik
+   - Sets up CORS, error handling, and routing
+
+2. **Service Layer (weather_service.py)**:
+   - Core business logic for weather functionality
+   - Handles geocoding (location to coordinates)
+   - Fetches weather data from Open-Meteo API
+   - Formats responses for both MCP and REST
+
+3. **Feature Modules (`features/hourly_weather/`)**:
+   - Modular organization of functionality
+   - Contains separate files for:
+     - MCP tool definition (tool.py)
+     - REST API routes (`routes.py`)
+     - Shared data models (`models.py`)
+
+4. **Caching Layer**:
+   - Uses Redis for caching location coordinates
+   - Improves performance for frequently requested locations
+
+## How MCP Integration Works
+
+The MCP integration is implemented using the `FastMCP` framework:
+
+1. **Tool Registration**:
+   ```python
+   @mcp.tool()
+   async def get_hourly_weather(location: str) -> Dict[str, Any]:
+       # Implementation
+   ```
+
+2. **Authentication Provider**:
+   - Custom `AuthProvider` implementation validates Authentik tokens
+   - Token verification ensures only authorized clients can access the service
+
+3. **Dual Transport Support**:
+   - HTTP mode: `mcp.http_app()` provides an ASGI application
+   - stdio mode: Direct process communication without HTTP overhead
+
+4. **Tool Metadata**:
+   - Rich descriptions and examples help AI assistants understand how to use the tool
+   - Parameter documentation ensures proper requests
+
+## REST API Integration
+
+The service also provides a REST API using FastAPI:
+
+1. **Endpoint Registration**:
+   ```python
+   @router.get("/weather")
+   async def get_weather(location: str, token_data: TokenData = Depends(verify_token)):
+       # Implementation
+   ```
+
+2. **Shared Business Logic**:
+   - Both MCP tools and REST endpoints use the same `WeatherService` class
+   - Ensures consistent behavior across interfaces
+
+3. **API Documentation**:
+   - FastAPI generates OpenAPI documentation at `/docs`
+   - Includes request/response schemas and authentication requirements
+
+## Authentication Flow
+
+1. The client (AI assistant or web app) sends a request with an Authentik Bearer token
+2. The authentication middleware validates the token with Authentik's introspection endpoint
+3. If valid, the request proceeds; otherwise, a 401 Unauthorized response is returned
+
+## How to Use This Service
+
+### As an AI Assistant
+
+1. Configure Copilot to connect to this service via mcp.json
+2. Ask weather-related questions like "What's the weather in Paris?"
+3. The assistant will call the `get_hourly_weather` tool with the location parameter
+4. The service returns structured weather data that the assistant interprets for you
+
+### As a REST API Client
+
+```bash
+# Get weather for a specific location
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:3000/weather?location=London
+```
+
+## Running the Service
+
+The included scripts make it easy to run the service:
+
+```bash
+# Run in MCP-only mode
+./run-server.sh
+
+# Run with both REST API and MCP endpoints
+./run-server.sh rest
+```
+
+This architecture provides a clean, modular, and secure implementation of an MCP service that can be used by AI assistants to retrieve real-time weather data.
 
 ## Project Structure and Implementation
 
