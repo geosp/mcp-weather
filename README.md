@@ -48,9 +48,9 @@ MCP implementations can take different approaches to managing state:
 - **Memory Usage**: Requires server-side storage for session data
 - **Potential Applications**: Tools that need to remember previous queries or maintain user preferences
 
-### How Weather MCP Works
+### How Our Weather Service Works
 
-The Weather MCP service exposes weather forecast capabilities to AI assistants through the MCP protocol:
+Our Weather MCP service exposes weather forecast capabilities to AI assistants through the MCP protocol, following this workflow:
 
 1. **Tool Registration**: The service registers the `get_hourly_weather` tool with metadata and parameter schemas
 2. **Authentication**: Requests are authenticated using Authentik (an identity provider)
@@ -155,13 +155,9 @@ This configuration allows:
    - Connect through SpecBridge for schema-based validation
    - Useful for testing against the API specification
 
-# Understanding the MCP Weather Service
+# Weather Service Architecture
 
-## What is MCP?
-
-The Model Context Protocol (MCP) is a specialized protocol that allows AI assistants (like GitHub Copilot) to interact with external services. In this project, MCP enables Copilot to access real-time weather data when users ask weather-related questions.
-
-## Architecture Overview
+## Service Design Overview
 
 This project implements a weather service with two key interfaces:
 1. **MCP API**: For AI assistant interactions
@@ -192,11 +188,13 @@ This project implements a weather service with two key interfaces:
    - Uses Redis for caching location coordinates
    - Improves performance for frequently requested locations
 
-## How MCP Integration Works
+## Implementation Details
 
-The MCP integration is implemented using the `FastMCP` framework:
+### MCP Tool Implementation
 
-1. **Tool Registration**:
+This project implements MCP integration using the `FastMCP` framework with these key technical aspects:
+
+1. **Tool Registration and Routing**:
    ```python
    @mcp.tool()
    async def get_hourly_weather(location: str) -> Dict[str, Any]:
@@ -207,7 +205,7 @@ The MCP integration is implemented using the `FastMCP` framework:
    - Custom `AuthProvider` implementation validates Authentik tokens
    - Token verification ensures only authorized clients can access the service
 
-3. **Dual Transport Support**:
+3. **Transport Layer**:
    - HTTP mode: `mcp.http_app()` provides an ASGI application
    - stdio mode: Direct process communication without HTTP overhead
 
