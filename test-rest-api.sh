@@ -18,4 +18,4 @@ echo "🧪 Testing Weather MCP REST API endpoints"
 echo "========================================"
 
 # Run the Python test script using uv
-uv run python tools/test_rest_api.py "$TOKEN"
+uv run python tools/test_weather_rest_client.py "$TOKEN"
