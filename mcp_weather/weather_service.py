@@ -174,6 +174,25 @@ class WeatherService:
         "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", 
         "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia"
     }
+    
+    # Reverse mapping from state names to abbreviations
+    US_STATES_REVERSE = {v.lower(): k for k, v in US_STATES.items()}
+    
+    # Country name variations to standardize country references
+    COUNTRY_VARIATIONS = {
+        "us": "United States",
+        "usa": "United States",
+        "u.s.": "United States",
+        "u.s.a.": "United States",
+        "united states of america": "United States",
+        "uk": "United Kingdom",
+        "u.k.": "United Kingdom",
+        "gb": "United Kingdom",  # Great Britain
+        "uae": "United Arab Emirates",
+        "u.a.e.": "United Arab Emirates",
+        "ca": "Canada",
+        "can": "Canada"
+    }
 
     def _parse_location(self, location: str) -> tuple[str, Optional[str], Optional[str]]:
         """
@@ -199,13 +218,32 @@ class WeatherService:
             if second_part.upper() in self.US_STATES:
                 state = second_part
                 country = "United States"
+            # Check if second part is a full U.S. state name
+            elif second_part.lower() in self.US_STATES_REVERSE:
+                state = self.US_STATES_REVERSE[second_part.lower()]
+                country = "United States"
+            # Check if second part is a country abbreviation or variant
+            elif second_part.lower() in self.COUNTRY_VARIATIONS:
+                country = self.COUNTRY_VARIATIONS[second_part.lower()]
             else:
                 country = second_part
                 
         elif len(parts) >= 3:
             # Format: "City, State, Country"
-            state = parts[1]
-            country = parts[2]
+            state_part = parts[1]
+            country_part = parts[2]
+            
+            # Check if the state part is a full state name, convert to abbreviation if so
+            if state_part.lower() in self.US_STATES_REVERSE:
+                state = self.US_STATES_REVERSE[state_part.lower()]
+            else:
+                state = state_part
+                
+            # Normalize country name if it's a known variant
+            if country_part.lower() in self.COUNTRY_VARIATIONS:
+                country = self.COUNTRY_VARIATIONS[country_part.lower()]
+            else:
+                country = country_part
             
             # If we have more than 3 parts, combine the rest into the country
             if len(parts) > 3:
@@ -237,11 +275,18 @@ class WeatherService:
         # Parse location components for better geocoding accuracy
         city, state, country = self._parse_location(location)
         
+        # Build the query based on the parsed components
+        query = city
+        if state:
+            # For US locations, just use city name and filter by state later
+            pass
+        elif country:
+            # For international locations, use city + normalized country
+            query = f"{city}"  # Don't include country in query, we'll filter by country later
+        
         # Set up basic parameters
         params = {
-            # For US locations with state, use just the city name and filter by state later
-            # For other locations with country, use the full location string
-            "name": city if state else (location if country else city),
+            "name": query,
             "count": 10,  # Request more results to filter
             "language": "en",
             "format": "json"
@@ -293,7 +338,18 @@ class WeatherService:
                 # Case 1: US location with state specified
                 if state and country and "united states" in country.lower():
                     logger.info(f"Filtering results for US city='{city}', state='{state}'")
-                    state_full = self.US_STATES.get(state.upper(), state)
+                    
+                    # Get full state name regardless of whether state is abbreviation or full name
+                    if state.upper() in self.US_STATES:
+                        state_full = self.US_STATES.get(state.upper(), state)
+                        state_abbr = state.upper()
+                    else:
+                        # Handle case where state is already the full name
+                        state_lower = state.lower()
+                        state_abbr = self.US_STATES_REVERSE.get(state_lower, state)
+                        state_full = self.US_STATES.get(state_abbr, state)
+                    
+                    logger.info(f"Processed state: abbreviation='{state_abbr}', full name='{state_full}'")
                     
                     # First priority: Exact city name + exact state match
                     for r in results:
@@ -303,7 +359,9 @@ class WeatherService:
                         
                         if (r_city == city.lower() and 
                             "united states" in r_country.lower() and
-                            (state_full.lower() in r_admin1 or state.lower() in r_admin1)):
+                            (state_full.lower() in r_admin1 or 
+                             state_abbr.lower() in r_admin1 or
+                             state.lower() in r_admin1)):
                             logger.info(f"Found exact US state match: {r.get('name')}, {r.get('admin1')}")
                             filtered_results.append(r)
                             break  # Use the first exact match
@@ -312,13 +370,27 @@ class WeatherService:
                 elif country:
                     logger.info(f"Filtering results for international city='{city}', country='{country}'")
                     
+                    # Handle US country variations specially
+                    is_us_query = False
+                    if country.lower() == "united states" or country.lower() in ["us", "usa", "u.s.", "u.s.a."]:
+                        is_us_query = True
+                    
                     # Look for exact city+country match first (case-insensitive)
                     for r in results:
                         r_country = r.get("country", "").lower()
                         r_city = r.get("name", "").lower()
                         
-                        # Direct match for both city and country
-                        if (r_city == city.lower() and country.lower() in r_country):
+                        # Direct match for city, flexible match for country
+                        country_match = False
+                        if is_us_query:
+                            # For US, match variations of United States
+                            country_match = "united states" in r_country
+                        else:
+                            # For other countries, do a more flexible match
+                            country_match = (country.lower() in r_country or 
+                                           r_country in country.lower())
+                        
+                        if r_city == city.lower() and country_match:
                             logger.info(f"Found exact international match: {r.get('name')}, {r.get('country')}")
                             filtered_results.append(r)
                     
@@ -327,7 +399,15 @@ class WeatherService:
                         for r in results:
                             r_country = r.get("country", "").lower()
                             
-                            if country.lower() in r_country:
+                            # More flexible country matching
+                            country_match = False
+                            if is_us_query:
+                                country_match = "united states" in r_country
+                            else:
+                                country_match = (country.lower() in r_country or 
+                                               r_country in country.lower())
+                                
+                            if country_match:
                                 logger.info(f"Found country match: {r.get('name')}, {r.get('country')}")
                                 filtered_results.append(r)
                 
