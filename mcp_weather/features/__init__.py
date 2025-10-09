@@ -6,5 +6,6 @@ Each feature has its own models, routes, and tool implementations.
 """
 
 from . import hourly_weather
+from . import geocoding
 
-__all__ = ["hourly_weather"]
+__all__ = ["hourly_weather", "geocoding"]

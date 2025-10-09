@@ -22,10 +22,11 @@ from core.server import BaseMCPServer, BaseService
 from mcp_weather.config import load_config, AppConfig
 from core.cache import RedisCacheClient
 from mcp_weather.weather_service import WeatherService
+from mcp_weather.geocoding_service import GeocodingService
 from mcp_weather.shared.models import ErrorResponse, ErrorDetail
 
 # Import features
-from mcp_weather.features import hourly_weather
+from mcp_weather.features import hourly_weather, geocoding
 
 try:
     from core.auth_mcp import create_auth_provider, get_auth_provider
@@ -67,12 +68,19 @@ class WeatherMCPService(BaseService):
         """
         self.config = config
         self.weather_service = None
+        self.geocoding_service = None
     
     def initialize(self) -> None:
         """Initialize the weather service and its dependencies"""
-        # Create the Redis cache client and weather service
+        # Create the Redis cache client and services
         cache_client = RedisCacheClient(self.config.redis_cache)
+        
+        # Initialize the geocoding service
+        self.geocoding_service = GeocodingService(self.config.weather_api.geocoding_url, cache_client)
+        
+        # Initialize the weather service
         self.weather_service = WeatherService(self.config.weather_api, cache_client)
+        
         logger.info("WeatherMCPService initialized with Redis cache for location handling")
     
     def get_service_name(self) -> str:
@@ -84,10 +92,14 @@ class WeatherMCPService(BaseService):
         if self.weather_service is None:
             raise ValueError("Weather service not initialized")
         
+        if self.geocoding_service is None:
+            raise ValueError("Geocoding service not initialized")
+        
         # Register tools from feature modules
         hourly_weather.tool.register_tool(mcp, self.weather_service)
+        geocoding.tool.register_tool(mcp, self.geocoding_service)
         
-        logger.info("Registered weather tools with MCP server")
+        logger.info("Registered weather and geocoding tools with MCP server")
 
 
 # ============================================================================
@@ -122,12 +134,13 @@ class WeatherMCPServer(BaseMCPServer):
     @property
     def allowed_cors_origins(self) -> List[str]:
         """Get list of allowed origins for CORS"""
+        # Use CORS origins from configuration
+        if hasattr(self.config, "server") and hasattr(self.config.server, "cors_origins"):
+            return self.config.server.cors_origins
+        # Fallback to default values if not configured
         return [
             "http://localhost:3000",
-            "http://localhost:8080",
-            "https://agentgateway.mixwarecs-home.net",
-            "http://agentgateway.mixwarecs-home.net",
-            "*"  # TODO: Restrict in production
+            "http://localhost:8080"
         ]
     
     def create_auth_provider(self) -> Optional[Any]:
@@ -179,6 +192,12 @@ class WeatherMCPServer(BaseMCPServer):
             weather_service
         )
         main_router.include_router(hourly_weather_router)
+        
+        # Add geocoding router
+        geocoding_router = geocoding.create_router(
+            weather_service.geocoding_service
+        )
+        main_router.include_router(geocoding_router)
         
         # Add root and health endpoints
         from mcp_weather.routes import create_base_router
@@ -252,6 +271,10 @@ class WeatherMCPServer(BaseMCPServer):
                     logger.info(f"Host: {config.server.host}")
                     logger.info(f"Port: {config.server.port}")
                     
+                    # Log CORS origins
+                    if hasattr(config.server, "cors_origins"):
+                        logger.info(f"CORS Origins: {', '.join(config.server.cors_origins)}")
+                    
                     if hasattr(config, "authentik") and config.authentik:
                         logger.info(f"Authentication: Authentik ({config.authentik.api_url})")
                     else:
@@ -294,6 +317,8 @@ def main() -> None:
         MCP_HOST: Bind address for HTTP mode (default: "0.0.0.0")
         MCP_PORT: Port for HTTP mode (default: "3000")
         MCP_ONLY: "true" for pure MCP, "false" for REST+MCP (default: "false")
+        MCP_CORS_ORIGINS: Comma-separated list of allowed CORS origins
+                         (default: "http://localhost:3000,http://localhost:8080")
         AUTHENTIK_API_URL: Authentik API URL (required for HTTP mode)
         AUTHENTIK_API_TOKEN: Authentik API token (required for HTTP mode)
         CACHE_DIR: Cache directory path (default: ~/.cache/weather)

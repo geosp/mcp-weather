@@ -60,6 +60,10 @@ class ServerConfig(BaseServerConfig):
         default=False,
         description="If True, serve pure MCP protocol; if False, serve REST + MCP"
     )
+    cors_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:8080"],
+        description="List of allowed origins for CORS"
+    )
     
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -69,8 +73,13 @@ class ServerConfig(BaseServerConfig):
         transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
         mcp_only = os.getenv("MCP_ONLY", "false").lower() == "true"
         
+        # Parse CORS origins from environment
+        cors_origins_str = os.getenv("MCP_CORS_ORIGINS", "http://localhost:3000,http://localhost:8080")
+        cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
+        
         config.transport = transport
         config.mcp_only = mcp_only
+        config.cors_origins = cors_origins
         
         return config
 
