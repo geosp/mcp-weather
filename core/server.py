@@ -273,18 +273,38 @@ class BaseMCPServer(abc.ABC):
             openapi_url="/openapi.json"
         )
         
-        # Add CORS middleware
+        # Add CORS middleware with explicit allow_headers for OpenAPI
         app.add_middleware(
             CORSMiddleware,
             allow_origins=self.allowed_cors_origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
+            allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
         )
         
         # Create and include REST routes
         router = self.create_router()
         app.include_router(router)
+        
+        # Add middleware for handling OPTIONS requests to openapi.json specifically
+        @app.middleware("http")
+        async def handle_openapi_options(request, call_next):
+            if request.method == "OPTIONS" and request.url.path == "/openapi.json":
+                # Check if the origin is allowed
+                origin = request.headers.get("origin")
+                if origin and origin in self.allowed_cors_origins:
+                    # Return a custom response for OPTIONS to openapi.json
+                    from fastapi.responses import JSONResponse
+                    response = JSONResponse(content={})
+                    response.headers["Access-Control-Allow-Origin"] = origin
+                    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+                    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With"
+                    response.headers["Access-Control-Allow-Credentials"] = "true"
+                    return response
+            
+            # For all other requests, continue with normal processing
+            response = await call_next(request)
+            return response
         
         # Mount MCP server at /mcp - using the HTTP app implementation
         app.mount("/mcp", mcp_app)
