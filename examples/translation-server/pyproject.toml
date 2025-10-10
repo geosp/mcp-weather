@@ -1,0 +1,28 @@
+[project]
+name = "mcp-translation"
+version = "1.0.0"
+description = "Translation MCP server using mcp-weather core infrastructure"
+requires-python = ">=3.10"
+dependencies = [
+    # Install mcp-weather from GitHub to get the core infrastructure
+    # Replace 'geosp' with your actual GitHub username
+    "mcp-weather @ git+https://github.com/geosp/mcp-weather.git",
+
+    # Alternative: Install from local development copy
+    # To use local version during development, run:
+    #   uv add --editable ../../
+    # This creates an editable install that reflects your local changes
+
+    # Alternative: Install from PyPI (once published)
+    # "mcp-weather>=0.1.0",
+]
+
+[project.scripts]
+mcp-translation = "mcp_translation.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
