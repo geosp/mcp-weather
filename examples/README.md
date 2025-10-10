@@ -345,16 +345,22 @@ The Kubernetes deployment intentionally **disables authentication** for weather 
 - Only affects `/weather-service/*` routes
 
 **Security Boundary:**
-```
-┌─────────────────────────┐
-│ Authenticated Routes    │  ← Normal K-Gateway auth
-│ /api/*, /admin/*, etc.  │
-└─────────────────────────┘
-┌─────────────────────────┐
-│ Public Tool Routes      │  ← Authentication bypassed
-│ /weather-service/*      │
-│ /other-tool-service/*   │
-└─────────────────────────┘
+
+```mermaid
+flowchart TB
+    subgraph A["🔒 Authenticated Routes"]
+        X["/api/*"]
+        Y["/admin/*"]
+        noteA["← Normal K-Gateway authentication"]
+    end
+
+    subgraph B["🌐 Public Tool Routes"]
+        W["/weather-service/*"]
+        Z["/other-tool-service/*"]
+        noteB["← Authentication bypassed"]
+    end
+
+    A --> B
 ```
 
 ### Production Security
