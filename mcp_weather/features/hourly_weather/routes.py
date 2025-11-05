@@ -11,6 +11,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
+from core.utils import inject_docstring, load_instruction
 # Import auth dependency
 from core.auth_rest import get_token_from_header
 
@@ -51,8 +52,7 @@ def create_router(weather_service: WeatherService) -> APIRouter:
     
     @router.get(
         "",
-        summary="Get Weather Forecast",
-        description="Get current conditions and hourly weather forecast for a location",
+        description=load_instruction("instructions.md", __file__),
         response_model=WeatherResponse,
         responses={
             200: {
@@ -75,27 +75,6 @@ def create_router(weather_service: WeatherService) -> APIRouter:
         ),
         token: str = Depends(get_token_from_header)
     ) -> WeatherResponse:
-        """
-        Get weather forecast for the specified location
-        
-        Retrieves current weather conditions and hourly forecast for the next 12 hours.
-        Location can be specified as city name or "city, country" format.
-        
-        Authentication required: Bearer token
-        
-        Args:
-            location: Location name (city or "city, country")
-            token: Authentik Bearer token (from Authorization header)
-            
-        Returns:
-            Weather data including current conditions and hourly forecasts
-            
-        Raises:
-            HTTPException 400: Invalid location format
-            HTTPException 401: Invalid or missing authentication
-            HTTPException 404: Location not found
-            HTTPException 503: Weather service unavailable
-        """
         try:
             logger.info(f"Weather request: location='{location}'")
             

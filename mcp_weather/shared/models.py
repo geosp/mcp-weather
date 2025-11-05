@@ -4,7 +4,7 @@ Shared models for Weather MCP Server
 Defines common model components used across multiple features.
 """
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -95,8 +95,8 @@ class ErrorResponse(BaseModel):
     
     success: bool = Field(default=False, description="Always false for errors")
     error: ErrorDetail = Field(..., description="Error information")
-    timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="Error timestamp"
     )
     

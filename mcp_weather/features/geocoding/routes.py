@@ -6,6 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from aiohttp import ClientSession
 
+from core.utils import inject_docstring, load_instruction
 from core.auth_rest import get_token_from_header
 from mcp_weather.geocoding_service import GeocodingService
 from mcp_weather.features.geocoding.models import GeocodingRequest, GeocodingResponse
@@ -34,27 +35,14 @@ def create_router(geocoding_service: GeocodingService) -> APIRouter:
     )
 
 
-    @router.post("/", response_model=GeocodingResponse, summary="Geocode a location")
+    @router.post("/", 
+        description=load_instruction("instructions.md", __file__),
+        response_model=GeocodingResponse
+    )
     async def geocode_location(
         request: GeocodingRequest,
         token: str = Depends(get_token_from_header)
     ):
-        """
-        Geocode a location name to coordinates and timezone information
-        
-        This endpoint takes a location string (e.g., city name, city and country) and
-        returns the resolved coordinates, timezone, and standardized location name.
-        
-        Examples:
-            - "Paris"
-            - "Tokyo, Japan"
-            - "Miami, FL"
-            - "Vancouver, BC, Canada"
-            - "London, Ontario, Canada"
-            
-        Returns:
-            GeocodingResponse with location details
-        """
         location = request.location
         
         try:

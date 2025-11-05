@@ -11,31 +11,11 @@ from typing import Dict, Any
 from aiohttp import ClientSession
 from fastmcp import FastMCP
 
+from core.utils import inject_docstring, load_instruction
 from mcp_weather.geocoding_service import GeocodingService
 from mcp_weather.features.geocoding.models import GeocodingResponse
 
 logger = logging.getLogger(__name__)
-
-# Tool metadata for documentation and discovery
-tool_metadata = {
-    "name": "geocode_location",
-    "description": "Get coordinates and timezone information for a location. "
-                  "This tool converts a city or address into geographic coordinates "
-                  "and timezone, useful for mapping applications, travel planning, "
-                  "and local time calculations.",
-    "examples": [
-        {
-            "description": "Get coordinates for a major city",
-            "call": "geocode_location('London')",
-            "use_case": "User asks 'What are the coordinates of London?'"
-        },
-        {
-            "description": "Get timezone for location with country specification",
-            "call": "geocode_location('Vancouver, Canada')",
-            "use_case": "User asks 'What timezone is Vancouver, Canada in?'"
-        }
-    ]
-}
 
 def register_tool(mcp: FastMCP, geocoding_service: GeocodingService) -> None:
     """
@@ -46,25 +26,8 @@ def register_tool(mcp: FastMCP, geocoding_service: GeocodingService) -> None:
         geocoding_service: GeocodingService instance for geocoding
     """
     @mcp.tool()
+    @inject_docstring(lambda: load_instruction("instructions.md", __file__))
     async def geocode_location(location: str) -> Dict[str, Any]:
-        """
-        Get coordinates and timezone information for a location.
-        
-        This tool converts a city or address into geographic coordinates and timezone, 
-        useful for mapping applications, travel planning, and local time calculations.
-        
-        Examples:
-        - "Paris, France"
-        - "Tokyo"
-        - "New York, NY"
-        - "Vancouver, BC, Canada"
-        
-        Args:
-            location: The location to geocode (city name, address, etc.)
-            
-        Returns:
-            Dictionary with location data (name, country, coordinates, timezone)
-        """
         try:
             logger.info(f"Processing geocoding request for: {location}")
             

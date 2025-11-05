@@ -10,7 +10,7 @@ models, routes, and tool implementations.
 
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -216,16 +216,17 @@ class WeatherMCPServer(BaseMCPServer):
         @app.exception_handler(HTTPException)
         async def app_http_exception_handler(request, exc):
             """Handle HTTP exceptions with custom format"""
-            return JSONResponse(
-                status_code=exc.status_code,
-                content=ErrorResponse(
+            error_response = ErrorResponse(
                     success=False,
                     error=ErrorDetail(
                         message=exc.detail,
                         error_code=f"HTTP_{exc.status_code}"
                     ),
-                    timestamp=datetime.utcnow()
-                ).model_dump()
+                    timestamp=datetime.now(UTC).isoformat()
+                )
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=error_response.model_dump()
             )
         
         @app.exception_handler(RequestValidationError)
