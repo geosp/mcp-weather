@@ -8,7 +8,9 @@ Uses a feature-based architecture where each feature has its own
 models, routes, and tool implementations.
 """
 
+import argparse
 import logging
+import os
 import sys
 from datetime import datetime, UTC
 from typing import Any, List, Optional
@@ -306,26 +308,88 @@ class WeatherMCPServer(BaseMCPServer):
 # Main Entry Point
 # ============================================================================
 
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Weather MCP Server - Provides weather data via MCP protocol",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                         # Run with stdio transport (default)
+  %(prog)s --mode stdio            # Run with stdio transport
+  %(prog)s --mode mcp --port 3000  # Run MCP-only server on port 3000
+  %(prog)s --mode rest --port 3000 # Run REST API + MCP server on port 3000
+  
+Environment Variables:
+  AUTHENTIK_API_URL      Authentik API URL (required for HTTP modes)
+  AUTHENTIK_API_TOKEN    Authentik API token (required for HTTP modes)
+  CACHE_DIR              Cache directory path (default: ~/.cache/weather)
+  CACHE_EXPIRY_DAYS      Cache expiry in days (default: 30)
+        """
+    )
+    
+    # Mode selection
+    parser.add_argument(
+        "--mode",
+        choices=["stdio", "mcp", "rest"],
+        default="stdio",
+        help="Server mode: stdio (default), mcp (HTTP MCP-only), or rest (HTTP with REST API + MCP)"
+    )
+    
+    # Host and port for HTTP modes
+    parser.add_argument(
+        "--host", 
+        default="0.0.0.0",
+        help="Host to bind to for HTTP modes (default: 0.0.0.0)"
+    )
+    
+    parser.add_argument(
+        "--port", 
+        type=int, 
+        default=3000,
+        help="Port to bind to for HTTP modes (default: 3000)"
+    )
+    
+    # Authentication control
+    parser.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="Disable authentication for HTTP modes (not recommended for production)"
+    )
+    
+    return parser.parse_args()
+
+
 def main() -> None:
     """
     Main entry point for the Weather MCP Server
     
-    Handles configuration loading, validation, and server startup.
-    Supports both stdio and HTTP transport modes with optional REST API.
-    
-    Environment Variables:
-        MCP_TRANSPORT: "stdio" or "http" (default: "stdio")
-        MCP_HOST: Bind address for HTTP mode (default: "0.0.0.0")
-        MCP_PORT: Port for HTTP mode (default: "3000")
-        MCP_ONLY: "true" for pure MCP, "false" for REST+MCP (default: "false")
-        MCP_CORS_ORIGINS: Comma-separated list of allowed CORS origins
-                         (default: "http://localhost:3000,http://localhost:8080")
-        AUTHENTIK_API_URL: Authentik API URL (required for HTTP mode)
-        AUTHENTIK_API_TOKEN: Authentik API token (required for HTTP mode)
-        CACHE_DIR: Cache directory path (default: ~/.cache/weather)
-        CACHE_EXPIRY_DAYS: Cache expiry in days (default: 30)
+    Handles argument parsing, configuration loading, validation, and server startup.
+    Supports stdio, MCP-only HTTP, and REST+MCP HTTP modes.
     """
     try:
+        # Parse command line arguments
+        args = parse_args()
+        
+        # Set environment variables based on command line arguments
+        if args.mode == "stdio":
+            os.environ["MCP_TRANSPORT"] = "stdio"
+            os.environ["MCP_ONLY"] = "true"
+        elif args.mode == "mcp":
+            os.environ["MCP_TRANSPORT"] = "http"
+            os.environ["MCP_ONLY"] = "true"
+            os.environ["MCP_HOST"] = args.host
+            os.environ["MCP_PORT"] = str(args.port)
+            if args.no_auth:
+                os.environ["AUTH_ENABLED"] = "false"
+        elif args.mode == "rest":
+            os.environ["MCP_TRANSPORT"] = "http"
+            os.environ["MCP_ONLY"] = "false"
+            os.environ["MCP_HOST"] = args.host
+            os.environ["MCP_PORT"] = str(args.port)
+            if args.no_auth:
+                os.environ["AUTH_ENABLED"] = "false"
+        
         # Load configuration
         config = load_config(validate=True)
         

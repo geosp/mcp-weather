@@ -1,5 +1,49 @@
 # Weather MCP Server - Project Structure
 
+## Installation
+
+### Prerequisites
+
+- Python 3.10 or higher
+- [uv](https://docs.astral.sh/uv/) package manager
+- Redis server (for caching)
+
+### Install from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/geosp/mcp-weather.git
+cd mcp-weather
+
+# Install in development mode
+uv pip install -e .
+
+# Verify installation
+uv run mcp-weather --help
+
+# Or run directly from virtual environment
+.venv/bin/mcp-weather --help
+```
+
+### Configuration
+
+Create a `.env` file in the project root:
+
+```bash
+# Required for HTTP modes with authentication
+AUTHENTIK_API_URL=http://your-authentik-instance
+AUTHENTIK_API_TOKEN=your_authentik_token
+
+# Optional configuration
+MCP_HOST=0.0.0.0
+MCP_PORT=3000
+CACHE_DIR=~/.cache/weather
+CACHE_EXPIRY_DAYS=30
+
+# Redis configuration (if not using default)
+REDIS_URL=redis://localhost:6379/0
+```
+
 ## Understanding the Model Context Protocol (MCP)
 
 ### What is MCP?
@@ -285,7 +329,43 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:3000/weather?locatio
 
 ## Running the Service
 
-The included scripts make it easy to run the service:
+### Command Line Interface
+
+The service supports three different modes via a simple command-line interface:
+
+```bash
+# Show help and available commands
+uv run mcp-weather --help
+
+# Run with stdio transport (default - for MCP clients like Claude Desktop)
+uv run mcp-weather
+# or explicitly:
+uv run mcp-weather --mode stdio
+
+# Run MCP-only server over HTTP
+uv run mcp-weather --mode mcp --port 3000 --host 0.0.0.0
+
+# Run REST API server with MCP endpoint
+uv run mcp-weather --mode rest --port 3000 --host 0.0.0.0
+
+# Disable authentication (for development only)
+uv run mcp-weather --mode mcp --port 3000 --no-auth
+uv run mcp-weather --mode rest --port 3000 --no-auth
+```
+
+**Mode Details:**
+- **stdio**: Uses stdin/stdout transport (perfect for MCP clients) - Default
+- **mcp**: HTTP-only MCP server (no REST endpoints)  
+- **rest**: Full HTTP server with both REST API and MCP endpoints
+
+**HTTP Mode Options:**
+- **--host**: Host to bind to (default: 0.0.0.0)
+- **--port**: Port to bind to (default: 3000)
+- **--no-auth**: Disable authentication (development only)
+
+### Legacy Scripts
+
+The included scripts are still available for backward compatibility:
 
 ```bash
 # Run in MCP-only mode

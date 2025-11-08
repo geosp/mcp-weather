@@ -42,6 +42,13 @@ from core.auth_rest import verify_token, get_authentik_client
 
 # Authentik client
 from core.authentik_client import AuthentikClient
+
+# 🆕 CLI Mode Support (New!)
+from core.server import (
+    create_standard_cli_parser,
+    apply_cli_args_to_environment, 
+    create_main_with_modes
+)
 ```
 
 ## Minimal Server (50 lines)
@@ -102,6 +109,53 @@ class MyServer(BaseMCPServer):
 
 def main():
     config = BaseServerConfig.from_env(env_prefix="MCP_")
+    service = MyService()
+    server = MyServer(config, service)
+    server.run()
+```
+
+## 🆕 Easy CLI Mode Support (New!)
+
+```python
+# Option 1: Automatic main() with --mode support
+from core.server import create_main_with_modes
+
+main = create_main_with_modes(
+    MyServer,                    # Server class
+    lambda config: MyService(),  # Service factory
+    lambda: BaseServerConfig.from_env("MCP_"),  # Config factory
+    "my-service",               # Service name
+    "My MCP Service"            # Description
+)
+
+if __name__ == "__main__":
+    main()
+```
+
+**Now your service automatically supports:**
+
+```bash
+python server.py --help                    # Show help
+python server.py                           # stdio mode (default)
+python server.py --mode mcp --port 3000    # MCP-only HTTP
+python server.py --mode rest --port 3000   # REST + MCP HTTP
+python server.py --mode mcp --no-auth      # No authentication
+```
+
+```python
+# Option 2: Manual CLI parsing
+from core.server import create_standard_cli_parser, apply_cli_args_to_environment
+
+def main():
+    # Parse CLI arguments
+    parser = create_standard_cli_parser("my-service")
+    args = parser.parse_args()
+    
+    # Apply to environment
+    apply_cli_args_to_environment(args)
+    
+    # Continue with normal setup
+    config = BaseServerConfig.from_env("MCP_")
     service = MyService()
     server = MyServer(config, service)
     server.run()

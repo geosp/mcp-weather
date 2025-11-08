@@ -27,6 +27,7 @@ uv add /path/to/mcp-weather
 By installing `mcp-weather` as a dependency, you get access to:
 
 - ✅ **Server Infrastructure** - Base classes for MCP servers
+- ✅ **CLI Mode Support** - Standard `--mode` flags (stdio, mcp, rest) 🆕
 - ✅ **Authentication** - Authentik OAuth integration
 - ✅ **Caching** - Redis-based async caching
 - ✅ **Configuration** - Pydantic models for environment variables
@@ -85,6 +86,32 @@ class MyService(BaseService):
 class MyServer(BaseMCPServer):
     # Implement required methods
     ...
+
+# 🆕 NEW: Easy CLI with mode support
+from core import create_main_with_modes
+
+main = create_main_with_modes(
+    MyServer,
+    lambda config: MyService(config),
+    load_config,
+    "my-service"
+)
+
+if __name__ == "__main__":
+    main()
+```
+
+**Now your service supports standard modes:**
+
+```bash
+# Stdio mode (default)
+python my_server.py
+
+# MCP-only HTTP server
+python my_server.py --mode mcp --port 3000
+
+# Full REST + MCP server  
+python my_server.py --mode rest --port 3000 --no-auth
 ```
 
 ## Using as a Weather Server

@@ -167,16 +167,13 @@ class TranslationMCPServer(BaseMCPServer):
 
 def main():
     """
-    Main entry point for the translation server
-
-    This shows the complete initialization flow:
-    1. Load configuration
-    2. Create services (cache, translation, MCP wrapper)
-    3. Create server
-    4. Run server
+    Main entry point for the Translation MCP Server (manual implementation)
     """
     try:
-        # Load configuration from environment
+        # Set log level to INFO
+        logging.getLogger().setLevel(logging.INFO)
+
+        logger.info("Starting Translation MCP Server...")
         logger.info("Loading configuration...")
         config = get_config()
 
@@ -210,10 +207,44 @@ def main():
         sys.exit(1)
 
 
+def create_translation_service(config: AppConfig) -> TranslationMCPService:
+    """Factory function for creating the translation service"""
+    # Create Redis cache client
+    cache_client = RedisCacheClient(config.redis_cache)
+    
+    # Create translation service (business logic)
+    translation_service = TranslationService(
+        api_config=config.translation_api,
+        cache_client=cache_client
+    )
+    
+    # Create MCP service wrapper
+    return TranslationMCPService(translation_service)
+
+
+# 🆕 NEW: Alternative main with CLI mode support
+from core.server import create_main_with_modes
+
+main_with_modes = create_main_with_modes(
+    TranslationMCPServer,
+    create_translation_service,
+    get_config,
+    "translation-server",
+    "Translation MCP Server - Provides text translation via MCP protocol"
+)
+
+
 if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    main()
+    
+    # You can choose between two approaches:
+    
+    # Option 1: Manual main (current approach) 
+    # main()
+    
+    # Option 2: 🆕 NEW - Automatic CLI with --mode support
+    main_with_modes()

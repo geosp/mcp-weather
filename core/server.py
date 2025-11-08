@@ -7,6 +7,7 @@ while maintaining consistent authentication, error handling, and configuration.
 """
 
 import abc
+import argparse
 import logging
 import sys
 from typing import Any, List, Optional, Type, TypeVar
@@ -331,40 +332,56 @@ class BaseMCPServer(abc.ABC):
         """
         Run MCP-only server (no REST API endpoints)
         """
-        # Get host and port using flattened configuration
-        host = self.get_config("server.host", self.get_config("host", "0.0.0.0"))
-        port = self.get_config("server.port", self.get_config("port", 3000))
-        
-        # Only log if not already logged by a child class
-        if not hasattr(self, "_already_logged"):
-            logger.info(f"Starting {self.service_title} in MCP-only mode")
-            logger.info("=" * 70)
-            logger.info(f"MCP Endpoint: http://{host}:{port}/mcp")
-            logger.info("=" * 70)
-            self._already_logged = True
+        # Get transport mode
+        transport = self.get_config("server.transport", self.get_config("transport", "stdio"))
         
         # Create MCP app
         self._mcp_app = self.create_mcp_app()
         
-        # Important: We need to directly run the HTTP app from FastMCP
-        # When in MCP-only mode, FastMCP should be directly run as a standalone app
-        # The http_app() method returns an ASGI app that can be run directly with uvicorn
-        asgi_app = self._mcp_app.http_app()
+        if transport == "stdio":
+            # Run stdio transport
+            self.run_stdio_transport()
+        else:
+            # Run HTTP transport
+            self.run_http_transport()
+    
+    def run_stdio_transport(self) -> None:
+        """
+        Run MCP server with stdio transport
+        """
+        if not hasattr(self, "_already_logged"):
+            logger.info(f"Starting {self.service_title} in stdio mode")
+            logger.info("=" * 70)
+            logger.info("Transport: stdio")
+            logger.info("Ready to receive MCP requests via stdin/stdout")
+            logger.info("=" * 70)
+            self._already_logged = True
         
-        # Store this for reference
-        self._fastapi_app = None
+        # Run FastMCP with stdio transport
+        self._mcp_app.run()
+    
+    def run_http_transport(self) -> None:
+        """
+        Run MCP server with HTTP transport
+        """
+        # Get host and port using flattened configuration
+        host = self.get_config("server.host", self.get_config("host", "0.0.0.0"))
+        port = self.get_config("server.port", self.get_config("port", 3000))
+        
+        if not hasattr(self, "_already_logged"):
+            logger.info(f"Starting {self.service_title} in MCP-only HTTP mode")
+            logger.info("=" * 70)
+            logger.info(f"Transport: HTTP")
+            logger.info(f"MCP Endpoint: http://{host}:{port}")
+            logger.info("=" * 70)
+            self._already_logged = True
+        
+        # Get the HTTP app from FastMCP and run it
+        asgi_app = self._mcp_app.http_app()
         
         # Run with uvicorn
         uvicorn.run(
             asgi_app,
-            host=host,
-            port=port,
-            log_level="info"
-        )
-        
-        # Run with uvicorn
-        uvicorn.run(
-            self._fastapi_app,
             host=host,
             port=port,
             log_level="info"
@@ -440,6 +457,10 @@ class BaseMCPServer(abc.ABC):
             transport = self.get_config("server.transport", self.get_config("transport", "stdio"))
             mcp_only = self.get_config("server.mcp_only", self.get_config("mcp_only", False))
             
+            # Force MCP-only mode for stdio transport (REST API doesn't work with stdio)
+            if transport == "stdio":
+                mcp_only = True
+            
             # Start server based on configuration
             if mcp_only:
                 # Pure MCP protocol (stdio or HTTP)
@@ -481,3 +502,202 @@ def create_server(
         Configured server instance
     """
     return server_class(config, service)
+
+
+def create_standard_cli_parser(
+    service_name: str,
+    description: str = None
+) -> "argparse.ArgumentParser":
+    """
+    Create a standard CLI parser with mode support for MCP servers
+    
+    This helper function creates a standardized command-line interface
+    that dependency users can easily integrate into their own servers.
+    
+    Args:
+        service_name: Name of the service (used in help text)
+        description: Description of the service (optional)
+        
+    Returns:
+        Configured ArgumentParser with standard MCP server options
+        
+    Example:
+        >>> parser = create_standard_cli_parser("my-service", "My MCP Service")
+        >>> args = parser.parse_args()
+        >>> # Use args.mode, args.host, args.port, args.no_auth
+    """
+    import argparse
+    
+    if description is None:
+        description = f"{service_name} - MCP Server"
+    
+    parser = argparse.ArgumentParser(
+        description=description,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+Examples:
+  {service_name}                         # Run with stdio transport (default)
+  {service_name} --mode stdio            # Run with stdio transport
+  {service_name} --mode mcp --port 3000  # Run MCP-only server on port 3000
+  {service_name} --mode rest --port 3000 # Run REST API + MCP server on port 3000
+  
+Standard Environment Variables:
+  MCP_TRANSPORT          Transport mode: stdio or http
+  MCP_HOST              Host to bind to for HTTP modes (default: 0.0.0.0)
+  MCP_PORT              Port to bind to for HTTP modes (default: 3000)
+  MCP_ONLY              true for MCP-only, false for REST+MCP
+  AUTH_ENABLED          Enable authentication for HTTP modes
+  LOG_LEVEL             Logging level (default: INFO)
+        """
+    )
+    
+    # Mode selection
+    parser.add_argument(
+        "--mode",
+        choices=["stdio", "mcp", "rest"],
+        default="stdio",
+        help="Server mode: stdio (default), mcp (HTTP MCP-only), or rest (HTTP with REST API + MCP)"
+    )
+    
+    # Host and port for HTTP modes
+    parser.add_argument(
+        "--host", 
+        default="0.0.0.0",
+        help="Host to bind to for HTTP modes (default: 0.0.0.0)"
+    )
+    
+    parser.add_argument(
+        "--port", 
+        type=int, 
+        default=3000,
+        help="Port to bind to for HTTP modes (default: 3000)"
+    )
+    
+    # Authentication control
+    parser.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="Disable authentication for HTTP modes (not recommended for production)"
+    )
+    
+    # Logging level
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Set logging level (default: INFO)"
+    )
+    
+    return parser
+
+
+def apply_cli_args_to_environment(args: "argparse.Namespace") -> None:
+    """
+    Apply parsed CLI arguments to environment variables
+    
+    This helper function takes the result of parse_args() from
+    create_standard_cli_parser() and sets the appropriate environment
+    variables that the core server infrastructure expects.
+    
+    Args:
+        args: Parsed arguments from create_standard_cli_parser()
+        
+    Example:
+        >>> parser = create_standard_cli_parser("my-service")
+        >>> args = parser.parse_args()
+        >>> apply_cli_args_to_environment(args)
+        >>> # Now environment variables are set for the server
+    """
+    import os
+    
+    # Set environment variables based on command line arguments
+    if args.mode == "stdio":
+        os.environ["MCP_TRANSPORT"] = "stdio"
+        os.environ["MCP_ONLY"] = "true"
+    elif args.mode == "mcp":
+        os.environ["MCP_TRANSPORT"] = "http"
+        os.environ["MCP_ONLY"] = "true"
+        os.environ["MCP_HOST"] = args.host
+        os.environ["MCP_PORT"] = str(args.port)
+        if args.no_auth:
+            os.environ["AUTH_ENABLED"] = "false"
+    elif args.mode == "rest":
+        os.environ["MCP_TRANSPORT"] = "http"
+        os.environ["MCP_ONLY"] = "false"
+        os.environ["MCP_HOST"] = args.host
+        os.environ["MCP_PORT"] = str(args.port)
+        if args.no_auth:
+            os.environ["AUTH_ENABLED"] = "false"
+    
+    # Set log level
+    if hasattr(args, 'log_level'):
+        os.environ["LOG_LEVEL"] = args.log_level
+
+
+def create_main_with_modes(
+    server_class: Type[T],
+    service_factory,
+    config_factory,
+    service_name: str,
+    description: str = None
+):
+    """
+    Create a main() function with standard CLI mode support
+    
+    This is a convenience function that creates a complete main() function
+    for MCP servers with standard CLI argument parsing and mode support.
+    
+    Args:
+        server_class: Class that extends BaseMCPServer
+        service_factory: Function that returns a BaseService instance
+        config_factory: Function that returns a configuration object
+        service_name: Name of the service
+        description: Description for help text
+        
+    Returns:
+        A main() function that can be used as the entry point
+        
+    Example:
+        >>> from core.server import create_main_with_modes
+        >>> from my_service import MyServer, MyService, load_config
+        >>> 
+        >>> main = create_main_with_modes(
+        ...     MyServer,
+        ...     lambda config: MyService(config),
+        ...     load_config,
+        ...     "my-service",
+        ...     "My Custom MCP Service"
+        ... )
+        >>> 
+        >>> if __name__ == "__main__":
+        ...     main()
+    """
+    def main() -> None:
+        try:
+            # Parse command line arguments
+            parser = create_standard_cli_parser(service_name, description)
+            args = parser.parse_args()
+            
+            # Apply CLI args to environment
+            apply_cli_args_to_environment(args)
+            
+            # Load configuration (after environment is set)
+            config = config_factory()
+            
+            # Create service
+            service = service_factory(config)
+            
+            # Create server
+            server = server_class(config, service)
+            
+            # Run server (will use environment variables set by CLI)
+            server.run()
+                
+        except KeyboardInterrupt:
+            logger.info("\nShutdown requested by user")
+            sys.exit(0)
+        except Exception as e:
+            logger.error(f"Fatal error during startup: {e}", exc_info=True)
+            sys.exit(1)
+    
+    return main

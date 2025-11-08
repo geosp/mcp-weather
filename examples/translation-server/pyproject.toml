@@ -6,13 +6,11 @@ requires-python = ">=3.10"
 dependencies = [
     # Install mcp-weather from GitHub to get the core infrastructure
     # Replace 'geosp' with your actual GitHub username
-    "mcp-weather @ git+https://github.com/geosp/mcp-weather.git",
-
+    "mcp-weather",
     # Alternative: Install from local development copy
     # To use local version during development, run:
     #   uv add --editable ../../
     # This creates an editable install that reflects your local changes
-
     # Alternative: Install from PyPI (once published)
     # "mcp-weather>=0.1.0",
 ]
@@ -26,3 +24,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.uv.sources]
+mcp-weather = { path = "../../" }
